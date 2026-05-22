@@ -1,5 +1,10 @@
 from fastapi import FastAPI
 from api.routers import whitepaper_router
+from core_shared.config import init_storage_directories
+
+
+init_storage_directories()
+
 
 app = FastAPI(title="Rochondra Core API")
 

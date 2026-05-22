@@ -1,0 +1,16 @@
+# config.toml
+
+[global]
+environment = "development"
+storage_base_dir = "storage"
+
+[whitepaper]
+pdf_subdir = "pdfs"
+markdown_subdir = "markdowns"
+images_subdir = "images"
+
+[tokenomics]
+# For tokenomics data, settings in the future.
+
+[social_media]
+# For social media data, settings in the future.

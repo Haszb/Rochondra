@@ -1,5 +1,6 @@
 import pymupdf4llm
 from pathlib import Path
+import shutil
 import re
 import ollama
 
@@ -72,3 +73,38 @@ def pdf_to_semantic_markdown(pdf_path: str, output_md: str, img_dir: str = "imag
     # 3. Sauvegarde et retour
     Path(output_md).write_text(final_md_text, encoding="utf-8") #type:ignore
     return final_md_text #type:ignore
+
+def save_pipeline_outputs(
+        md_content: str,
+        final_md_path: str,
+        temp_img_dir: str,
+        final_img_dir: str
+) -> int:
+    """
+    Sauvegarde le contenu Markdown et déplace le dossier d'images temporaire 
+    vers le stockage permanent (Datalake).
+    
+    Retourne 0 en cas de succès, 1 en cas d'erreur.
+    """
+    try:
+        #1. Save the markdown content to the final path
+        md_path = Path(final_md_path)
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(md_content, encoding="utf-8")
+
+        #2. Move the image directory if it exists
+        source_imgs = Path(temp_img_dir)
+        target_imgs = Path(final_img_dir)
+
+        if source_imgs.exists() and any(source_imgs.iterdir()): # Check if there are images to move
+            if target_imgs.exists():
+                shutil.rmtree(target_imgs)
+
+            target_imgs.parent.mkdir(parents=True, exist_ok=True)
+
+            shutil.copytree(source_imgs, target_imgs)
+
+        return 0
+    except Exception as e:
+        print(f"Erreur lors de la sauvegarde des outputs : {e}")
+        return 1
