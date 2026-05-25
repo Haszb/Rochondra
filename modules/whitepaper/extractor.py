@@ -79,12 +79,12 @@ def save_pipeline_outputs(
         final_md_path: str,
         temp_img_dir: str,
         final_img_dir: str
-) -> int:
+) -> bool:
     """
     Sauvegarde le contenu Markdown et déplace le dossier d'images temporaire 
     vers le stockage permanent (Datalake).
     
-    Retourne 0 en cas de succès, 1 en cas d'erreur.
+    Retourne True en cas de succès, False en cas d'erreur.
     """
     try:
         #1. Save the markdown content to the final path
@@ -104,7 +104,9 @@ def save_pipeline_outputs(
 
             shutil.copytree(source_imgs, target_imgs)
 
-        return 0
+        return True
     except Exception as e:
         print(f"Erreur lors de la sauvegarde des outputs : {e}")
-        return 1
+        return False
+
+    
