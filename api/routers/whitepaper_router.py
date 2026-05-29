@@ -1,5 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from pathlib import Path
 import tempfile
 import uuid
@@ -14,21 +13,17 @@ import logging
 
 from core_shared.config import WhitepaperConfig
 from modules.whitepaper.extractor import pdf_to_semantic_markdown, save_pipeline_outputs
+from modules.whitepaper.structural_analysis import compute_structural_metrics
+from api.schemas import ExtractionResponse, StructuralAnalysisResponse
 
 router = APIRouter(prefix="/whitepaper", tags=["Whitepaper"])
 
 logger = logging.getLogger(__name__)
 _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 Mo
 
-class ExtractionResponse(BaseModel):
-    status: str
-    extract_images: bool
-    save_markdown: bool = False
-    doc_uuid: Optional[str] = None  # On ajoute l'UUID dans la réponse pour le client
-    markdown_content: str
-
 # ---------------------------------------------------------------------------
-# Registre CSV — point d'entrée unique, facile à remplacer par une DB plus tard
+# Registre CSV — Those Function are here, because later on, they will be deleted and replaced by database interactions. 
+# Keeping them here for now to avoid confusion with the main logic of the endpoints.
 # ---------------------------------------------------------------------------
  
 def _append_to_registry(entry: dict) -> None:
@@ -49,8 +44,45 @@ def _append_to_registry(entry: dict) -> None:
         df.to_csv(registry_path, index=False)
 
 
+def _update_analysis_to_registry(metrics: dict) -> None:
+    """
+    Met à jour le registre CSV avec les métriques.
+    Utilisation de variables locales explicites pour éviter les conflits avec les modules.
+    """
+    registry_path = WhitepaperConfig.REGISTRY_PATH
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    lock_path = str(registry_path) + ".lock"
+    
+    with FileLock(lock_path, timeout=10):
+        if registry_path.exists():
+            df = pd.read_csv(registry_path)
+        else:
+            df = pd.DataFrame()
+        
+        # On utilise un nom distinct (target_uuid) pour éviter le conflit avec le module 'uuid'
+        target_uuid = metrics.get("uuid")
+        if not target_uuid:
+            raise KeyError("Le dictionnaire de métriques ne contient pas de clé 'uuid' valide.")
+        
+        if "uuid" in df.columns and target_uuid in df["uuid"].values:
+            # Sélection vectorisée propre via .loc
+            for k, v in metrics.items():
+                if k != "uuid":
+                    df.loc[df["uuid"] == target_uuid, k] = v
+        else:
+            # Ajout d'une nouvelle ligne si l'UUID n'existe pas encore
+            df = pd.concat([df, pd.DataFrame([metrics])], ignore_index=True)
+            
+        df.to_csv(registry_path, index=False)
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
 @router.post("/extract", response_model=ExtractionResponse)
 async def extract_document(
+    request: Request,
     file: UploadFile = File(...),
     extract_images: bool = Form(...),
     save_markdown: bool = Form(...),
@@ -129,7 +161,11 @@ async def extract_document(
                     "analyzed_at" :datetime.now(timezone.utc).isoformat(),
                 })
 
-
+            if save_markdown and generated_uuid:
+                request.session['current_uuid'] = generated_uuid
+                request.session['current_project'] = project_name or Path(file.filename).stem
+            
+            print(generated_uuid)
 
             return ExtractionResponse(
                 status="success",
@@ -141,7 +177,44 @@ async def extract_document(
 
     except HTTPException:
         raise  # On laisse remonter les erreurs déjà formatées
-    except Exception as e:
+    except Exception:
         logger.exception("Erreur inattendue lors du traitement du fichier %s", file.filename)
         raise HTTPException(status_code=500, detail="Erreur interne du serveur.")
     
+    
+@router.post("/structural_analysis", response_model=StructuralAnalysisResponse)
+async def analyze_document_structure(request: Request,
+                                     include_images_stats: bool = Form(default=False),
+                                     ):
+    
+    doc_uuid = request.session.get('current_uuid')
+
+    if not doc_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail="Aucun document en session. Extrayez d'abord un document via /extract."
+        )
+
+    try:
+        metrics = await asyncio.to_thread(
+            compute_structural_metrics,
+            uuid=doc_uuid,
+            include_images_stats=include_images_stats
+        )
+        
+        await asyncio.to_thread(_update_analysis_to_registry, metrics=metrics)
+        
+        return StructuralAnalysisResponse(
+            status="success",
+            uuid=doc_uuid,
+            metrics=metrics,
+            saved_to_registry=True
+        )
+        
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erreur lors de l'analyse structurelle de {doc_uuid} : {e}")
+        raise HTTPException(status_code=500, detail=f"Erreur interne lors de l'analyse : {str(e)}")
+    
+

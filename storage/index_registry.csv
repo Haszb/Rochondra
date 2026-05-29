@@ -1,9 +1,23 @@
-uuid,project_name,filename,file_size_mb,status,analyzed_at
-3784ce0a-9353-4a47-bca7-0bc64768b56e,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:14:26
-4b1d4489-d310-4e37-af56-638197fb6684,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:16:53
-84f9eedc-e55d-48d9-a120-8642c860dc67,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:19:57
-abacfe37-e2d7-4061-93ca-0bd5d84eb50a,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:21:24
-87d9a107-fff2-48dd-a9ae-31949a43f118,Bitcoin,bitcoin.pdf,0.18,success,2026-05-25 16:30:17
-551edc44-9a6e-47a8-84c4-ab12c7df2b45,bitcoin,bitcoin.pdf,0.18,success,2026-05-25T14:48:51.762006+00:00
-11d1917c-2496-4496-88b6-07eb63af0cd2,DogechainWP,DogechainWP.pdf,0.53,success,2026-05-25T14:49:27.531752+00:00
-b9f399d9-a39c-4e95-8c9a-41200983bc41,DogeCoin,DogechainWP.pdf,0.53,success,2026-05-25T14:51:42.746859+00:00
+uuid,project_name,filename,file_size_mb,status,analyzed_at,text_size_bytes,word_count,sentence_count,syllable_count,avg_word_length,gunning_fog_index,flesch_reading_ease,image_count,images_total_size_bytes
+3784ce0a-9353-4a47-bca7-0bc64768b56e,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:14:26,,,,,,,,,
+4b1d4489-d310-4e37-af56-638197fb6684,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:16:53,,,,,,,,,
+84f9eedc-e55d-48d9-a120-8642c860dc67,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:19:57,,,,,,,,,
+abacfe37-e2d7-4061-93ca-0bd5d84eb50a,Bitcoin,bitcoin.pdf,0.18,success,2026-05-22 16:21:24,,,,,,,,,
+87d9a107-fff2-48dd-a9ae-31949a43f118,Bitcoin,bitcoin.pdf,0.18,success,2026-05-25 16:30:17,,,,,,,,,
+551edc44-9a6e-47a8-84c4-ab12c7df2b45,bitcoin,bitcoin.pdf,0.18,success,2026-05-25T14:48:51.762006+00:00,,,,,,,,,
+11d1917c-2496-4496-88b6-07eb63af0cd2,DogechainWP,DogechainWP.pdf,0.53,success,2026-05-25T14:49:27.531752+00:00,,,,,,,,,
+b9f399d9-a39c-4e95-8c9a-41200983bc41,DogeCoin,DogechainWP.pdf,0.53,success,2026-05-25T14:51:42.746859+00:00,,,,,,,,,
+ec56bf89-65fc-4ecf-9066-3d1180fe61b2,Dogecoin,DogechainWP.pdf,0.53,success,2026-05-25T16:00:30.935176+00:00,,,,,,,,,
+77e7c4f5-cf89-4ac3-bca1-053eaf1d7bfd,Dogecoin,DogechainWP.pdf,0.53,success,2026-05-25T16:03:19.521221+00:00,,,,,,,,,
+a98849e7-0ad0-4102-b468-ae89eed790c6,D,DogechainWP.pdf,0.53,success,2026-05-25T16:24:33.306541+00:00,,,,,,,,,
+540560cd-ccfa-460c-bb4a-f67a4f9e82a3,D,DogechainWP.pdf,0.53,success,2026-05-25T16:25:37.712362+00:00,,,,,,,,,
+3b722481-d370-4ce9-8940-c0f678dbd7ac,D,DogechainWP.pdf,0.53,success,2026-05-25T16:27:19.279139+00:00,,,,,,,,,
+29f2b836-e1cf-4b5c-a803-5bd70e7c4aa4,D,DogechainWP.pdf,0.53,success,2026-05-25T16:49:45.048281+00:00,40690.0,6042.0,377.0,10216.0,5.42,13.74,46.27,0.0,0.0
+50d1fd17-3309-43f9-be71-7a092a8deb57,D,bitcoin.pdf,0.18,success,2026-05-25T17:14:43.327475+00:00,21184.0,3417.0,178.0,5309.0,4.87,13.35,54.95,0.0,0.0
+c2cc0bf6-caf9-4db2-83be-1152c65e8ac1,test,bitcoin.pdf,0.18,success,2026-05-26T14:25:27.564377+00:00,21184.0,3417.0,178.0,5309.0,4.87,13.35,54.95,0.0,0.0
+670e8172-ddcd-4378-a938-311fb9ee37ab,test_img,bitcoin.pdf,0.18,success,2026-05-26T14:32:13.007909+00:00,23860.0,3417.0,178.0,5309.0,4.87,13.35,54.95,11.0,122267.0
+0eeb3337-acac-472c-9040-39b1b0528030,Dogecoin,DogechainWP.pdf,0.53,success,2026-05-29T12:55:22.608403+00:00,,,,,,,,,
+fb1f7f04-0716-466c-acd3-05f7e19e90fc,D,DogechainWP.pdf,0.53,success,2026-05-29T12:57:59.985872+00:00,42062.0,6042.0,377.0,10216.0,5.42,13.74,46.27,6.0,745502.0
+77e41696-515f-44c2-9730-d1c84a6ddcda,D1,DogechainWP.pdf,0.53,success,2026-05-29T12:58:52.912105+00:00,40690.0,6042.0,377.0,10216.0,5.42,13.74,46.27,0.0,0.0
+fb1f7f04-0716-466c-acd3-05f7e19e90fc,D,DogechainWP.pdf,0.53,success,2026-05-29T12:57:59.985872+00:00,42062.0,,,,,,,,
+db0245a4-2d13-4b02-83fb-4d7090301017,TL,TerraLunaWP.pdf,0.24,success,2026-05-29T13:08:02.021918+00:00,31860.0,5028.0,233.0,8549.0,5.14,15.75,40.38,,
