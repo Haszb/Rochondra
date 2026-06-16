@@ -6,7 +6,6 @@ import pandas as pd
 from datetime import datetime, timezone
 from filelock import FileLock
 import re
-import os
 import shutil
 from typing import Optional
 import asyncio

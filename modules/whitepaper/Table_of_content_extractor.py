@@ -503,8 +503,8 @@ class WhitepaperExtractor:
 
 if __name__ == "__main__":
 
-    WHITEPAPER_DIR = "/media/hassan/Hassan/Whitepaper"
-    OUTPUT_DIR     = "/media/hassan/Hassan/Whitepaper/tocs"
+    WHITEPAPER_DIR = "/data/Whitepaper"
+    OUTPUT_DIR     = "/data/Whitepaper/tocs"
 
     extractor = WhitepaperExtractor(
         llm_model="gemma4:31b-cloud",
