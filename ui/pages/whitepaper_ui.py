@@ -1,17 +1,15 @@
-# ui/pages/whitepaper_ui.py
 import streamlit as st
 import requests
 
-API_URL = "http://127.0.0.1:8000/api/whitepaper"
+from core_shared.config import API_URL
 
-# ---------------------------------------------------------------------------
-# Session HTTP persistante — maintient le cookie de session FastAPI
-# entre les appels /extract et /structural_analysis
-# ---------------------------------------------------------------------------
+API_WHITEPAPER_URL = f"{API_URL}/whitepaper"
+
+# Session HTTP persistante — maintient le cookie Starlette entre les appels
 if "http_session" not in st.session_state:
     st.session_state["http_session"] = requests.Session()
 
-http = st.session_state["http_session"]
+http = st.session_state["http_session"]  # ← alias court
 
 # ---------------------------------------------------------------------------
 # Section 1 — Extraction
@@ -32,7 +30,7 @@ if uploaded_file and st.button("Lancer l'extraction"):
             "project_name":   project_name,
         }
         try:
-            response = http.post(f"{API_URL}/extract", files=files, data=data)  # ← http, pas requests
+            response = http.post(f"{API_WHITEPAPER_URL}/extract", files=files, data=data)  # ← http
             if response.status_code == 200:
                 result_json = response.json()
                 st.session_state["doc_uuid"] = result_json.get("doc_uuid")
@@ -54,15 +52,15 @@ doc_uuid = st.session_state.get("doc_uuid")
 if doc_uuid:
     st.caption(f"Document en session : `{doc_uuid}`")
 else:
-    st.info("Aucun document en session — lancez d'abord une extraction avec **Sauvegarder le Markdown** activé.")
+    st.info("Aucun document en session — lancez d'abord une extraction.")
 
 include_images_stats = st.toggle("Inclure les stats d'images", value=False)
 
 if st.button("Lancer l'analyse structurelle", disabled=not doc_uuid):
     with st.spinner("Analyse en cours..."):
         try:
-            response = http.post(  # ← http, pas requests
-                f"{API_URL}/structural_analysis",
+            response = http.post(  # ← http
+                f"{API_WHITEPAPER_URL}/structural_analysis",
                 data={"include_images_stats": str(include_images_stats).lower()},
             )
             if response.status_code == 200:

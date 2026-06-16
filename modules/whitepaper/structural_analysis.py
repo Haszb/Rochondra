@@ -20,6 +20,9 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
     Calcule les métriques structurelles sur le texte épuré du document.
     Renvoie un dictionnaire incluant l'UUID du document traité.
     """
+    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', uuid):
+        raise ValueError(f"UUID invalide : {uuid!r}")
+    
     md_path = WhitepaperConfig.MD_DIR / f"{uuid}.md"
     img_dir = WhitepaperConfig.IMG_DIR / uuid
 
@@ -48,7 +51,9 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
     total_chars_in_words = sum(len(word) for word in words)
     avg_word_len = round(total_chars_in_words / word_count, 2) if word_count > 0 else 0.0
 
-    img_stats = {}
+    img_stats = {} #The dictionary is initialized empty to ensure that the default value is None, 
+    # if the user does not want to include image stats or if the image directory does not exist. 
+    # This way, we avoid returning misleading zero values for image stats when they are not requested or not available.
     if include_images_stats:
         if img_dir.exists():
             img_files = [f for f in img_dir.iterdir() if f.is_file()]
@@ -63,8 +68,6 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
                 "images_total_size_bytes": None,
                 }
 
-
-
     return {
         "uuid": uuid,  # <-- L'UUID est nativement ancré ici
         "text_size_bytes": text_size_bytes,
@@ -72,7 +75,7 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
         "sentence_count": sentence_count,
         "syllable_count": syllable_count,
         "avg_word_length": avg_word_len,
-        "gunning_fog_index": round(gunning_fog, 2),
-        "flesch_reading_ease": round(flesch_reading_ease, 2),
+        "gunning_fog_index":  round(gunning_fog, 2) if gunning_fog > 0 else None,
+        "flesch_reading_ease": round(flesch_reading_ease, 2) if flesch_reading_ease  > 0 else None,
         **img_stats,
     }

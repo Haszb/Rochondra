@@ -109,4 +109,5 @@ def save_pipeline_outputs(
         print(f"Erreur lors de la sauvegarde des outputs : {e}")
         return False
 
-    
+def structure_extractor():
+    pass    

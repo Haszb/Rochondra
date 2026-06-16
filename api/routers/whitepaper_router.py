@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime, timezone
 from filelock import FileLock
 import re
+import os
 import shutil
 from typing import Optional
 import asyncio
@@ -14,7 +15,8 @@ import logging
 from core_shared.config import WhitepaperConfig
 from modules.whitepaper.extractor import pdf_to_semantic_markdown, save_pipeline_outputs
 from modules.whitepaper.structural_analysis import compute_structural_metrics
-from api.schemas import ExtractionResponse, StructuralAnalysisResponse
+from modules.whitepaper.Table_of_content_extractor import WhitepaperExtractor
+from api.schemas import ExtractionResponse, StructuralAnalysisResponse, TocExtractionResponse
 
 router = APIRouter(prefix="/whitepaper", tags=["Whitepaper"])
 
@@ -124,46 +126,47 @@ async def extract_document(
             # Initialisation de la variable pour la réponse JSON
             generated_uuid : Optional[str] = None
 
-            if save_markdown:
-                # 1. Génération de l'identifiant unique immuable
-                generated_uuid = str(uuid.uuid4())
-                
-                # 2. Définition des chemins du Datalake basés sur l'UUID
-                final_pdf_path = WhitepaperConfig.PDF_DIR / f"{generated_uuid}.pdf"
-                final_md_path = WhitepaperConfig.MD_DIR / f"{generated_uuid}.md"
-                final_img_dir = WhitepaperConfig.IMG_DIR / generated_uuid
 
-                for p in [final_pdf_path, final_md_path, final_img_dir]:
-                    p.parent.mkdir(parents=True, exist_ok=True)
+            # 1. Génération de l'identifiant unique immuable
+            generated_uuid = str(uuid.uuid4())
+            
+            # 2. Définition des chemins du Datalake basés sur l'UUID
+            final_pdf_path = WhitepaperConfig.PDF_DIR / f"{generated_uuid}.pdf"
+            final_md_path = WhitepaperConfig.MD_DIR / f"{generated_uuid}.md"
+            final_img_dir = WhitepaperConfig.IMG_DIR / generated_uuid
+
+            for p in [final_pdf_path, final_md_path, final_img_dir]:
+                p.parent.mkdir(parents=True, exist_ok=True)
 
 
-                # 3. Écriture du PDF brut
-                shutil.copy2(src=pdf_path, dst=final_pdf_path)
+            # 3. Écriture du PDF brut
+            shutil.copy2(src=pdf_path, dst=final_pdf_path)
 
-                # 4. Écriture du Markdown et déplacement du dossier d'images
-                save_status = save_pipeline_outputs(
-                    md_content=markdown_content,
-                    final_md_path=str(final_md_path),
-                    temp_img_dir=str(img_dir),
-                    final_img_dir=str(final_img_dir)
-                )
-                
-                if not save_status:
-                    raise HTTPException(status_code=500, detail="Échec de la persistance des fichiers.")
+            # 4. Écriture du Markdown et déplacement du dossier d'images
+            save_status = save_pipeline_outputs(
+                md_content=markdown_content,
+                final_md_path=str(final_md_path),
+                temp_img_dir=str(img_dir),
+                final_img_dir=str(final_img_dir)
+            )
+            
+            if not save_status:
+                raise HTTPException(status_code=500, detail="Échec de la persistance des fichiers.")
 
-                # 5. Enregistrement dans le registre CSV
-                _append_to_registry({
-                    "uuid": generated_uuid,
-                    "project_name": (project_name or Path(file.filename).stem).strip() or "Unknown",
-                    "filename": file.filename,
-                    "file_size_mb": round(len(file_content)/ (1024*1024), 2),
-                    "status": "success",
-                    "analyzed_at" :datetime.now(timezone.utc).isoformat(),
-                })
+            # 5. Enregistrement dans le registre CSV
+            _append_to_registry({
+                "uuid": generated_uuid,
+                "project_name": (project_name or Path(file.filename).stem).strip() or "Unknown",
+                "filename": file.filename,
+                "file_size_mb": round(len(file_content)/ (1024*1024), 2),
+                "status": "success",
+                "analyzed_at" :datetime.now(timezone.utc).isoformat(),
+                "marked_for_deletion": not save_markdown
+            })
 
-            if save_markdown and generated_uuid:
-                request.session['current_uuid'] = generated_uuid
-                request.session['current_project'] = project_name or Path(file.filename).stem
+
+            request.session['current_uuid'] = generated_uuid
+            request.session['current_project'] = project_name or Path(file.filename).stem
             
             print(generated_uuid)
 
@@ -217,4 +220,51 @@ async def analyze_document_structure(request: Request,
         logger.error(f"Erreur lors de l'analyse structurelle de {doc_uuid} : {e}")
         raise HTTPException(status_code=500, detail=f"Erreur interne lors de l'analyse : {str(e)}")
     
+@router.post("/toc_extraction", response_model=TocExtractionResponse)
+async def extract_toc(request: Request):
+    doc_uuid = request.session.get('current_uuid')
+    
+    if not doc_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail="Aucun document en session. Extrayez d'abord un document via /extract."
+        )
+    
+    OUTPUT_DIR = WhitepaperConfig.TOCS_DIR
 
+    extractor = WhitepaperExtractor(
+        llm_model="gemma4:31b-cloud",
+        output_dir=OUTPUT_DIR, 
+    )
+
+    try:
+        
+        sections = await asyncio.to_thread(
+            extractor.extract, 
+            uuid=doc_uuid, 
+            use_llm=True
+        )
+
+        toc_data = ""
+        for s in sections:
+            indent = "  " * (s.level - 1)
+            toc_data += f"  {indent}{'#' * s.level} {s.title}  (p.{s.page})\n"
+        # 
+        return TocExtractionResponse(
+            status="success",
+            uuid=doc_uuid,
+            toc_content=toc_data
+        )
+    
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Le document PDF correspondant à l'UUID {doc_uuid} est introuvable."
+        )
+    
+    except Exception as e:
+        logger.error(f"Erreur lors de l'extraction TOC pour {doc_uuid} : {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Erreur interne lors de l'extraction de la table des matières."
+        )

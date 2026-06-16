@@ -17,13 +17,7 @@ class StructuralAnalysisResponse(BaseModel):
     metrics: dict
     saved_to_registry: bool = True
 
-
-class AnalysisRequest(BaseModel):
-    question: str
-    model_name: str = "qwen3.5:9b"
-
-class AnalysisResponse(BaseModel):
+class TocExtractionResponse(BaseModel):
     status: str
-    markdown_content: Optional[str] = None
-    analysis_result: Optional[str] = None
-    error: Optional[str] = None
+    uuid: str
+    toc_content: str
