@@ -38,7 +38,7 @@ def _append_to_registry(entry: dict) -> None:
     lock_path = str(registry_path) + ".lock"
     with FileLock(lock_path, timeout=10):
         df_new = pd.DataFrame([entry])
-        if registry_path.exists():
+        if registry_path.exists() and registry_path.stat().st_size > 0:
             df = pd.concat([pd.read_csv(registry_path), df_new], ignore_index=True)
         else:
             df = df_new
@@ -56,7 +56,7 @@ def _update_analysis_to_registry(metrics: dict) -> None:
     lock_path = str(registry_path) + ".lock"
     
     with FileLock(lock_path, timeout=10):
-        if registry_path.exists():
+        if registry_path.exists()and registry_path.stat().st_size > 0:
             df = pd.read_csv(registry_path)
         else:
             df = pd.DataFrame()
@@ -232,7 +232,7 @@ async def extract_toc(request: Request):
     OUTPUT_DIR = WhitepaperConfig.TOCS_DIR
 
     extractor = WhitepaperExtractor(
-        llm_model="gemma4:31b-cloud",
+        llm_model= WhitepaperConfig.LLM_MODEL,
         output_dir=OUTPUT_DIR, 
     )
 

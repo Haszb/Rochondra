@@ -3,6 +3,7 @@ from pathlib import Path
 import shutil
 import re
 import ollama
+from core_shared.config import WhitepaperConfig
 
 
 def describe_image_with_ollama(image_path: str) -> str:
@@ -26,7 +27,7 @@ def describe_image_with_ollama(image_path: str) -> str:
 """
     # Assurez-vous d'avoir téléchargé un modèle vision, ex: 'llava' ou 'llama3.2-vision'
     response = ollama.chat(
-        model='gemma4:31b-cloud',
+        model=WhitepaperConfig.LLM_MODEL,
         messages=[
             {
             'role': 'system',

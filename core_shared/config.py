@@ -27,6 +27,7 @@ class WhitepaperConfig:
     IMG_DIR       = STORAGE_ROOT / _wp["images_subdir"]
     REGISTRY_PATH = STORAGE_ROOT / "index_registry.csv"
     TOCS_DIR      = STORAGE_ROOT / _wp["tocs_subdir"]
+    LLM_MODEL     = _config_data["whitepaper"]["model"]
 
 
 class TokenomicsConfig:

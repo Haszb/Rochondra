@@ -34,3 +34,6 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+
+# different notebooks to explore ideas
+sentiment_analysis.ipynb

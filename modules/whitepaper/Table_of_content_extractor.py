@@ -35,6 +35,7 @@ class Section:
     title: str
     level: int
     page: int
+    size: float = 0.0
     content: str = ""
     children: list["Section"] = field(default_factory=list)
 
@@ -67,7 +68,9 @@ class WhitepaperExtractor:
 
     # Exclusions inconditionnelles
     EXCLUDE_PATTERNS = [
-        re.compile(r'^0x[a-fA-F0-9]{10,}'),   # adresses crypto
+        re.compile(r'^0x[a-fA-F0-9]{40}$'),   # Remove Ethereum addresses
+        re.compile(r'^(bc1|[13])[a-zA-HJ-NP-Z0-9]{25,39}$'),  # Bitcoin addresses
+        # From https://docs.0xprocessing.com/quick-start/match-crypto-wallet-addresses
         re.compile(r'https?://'),               # URLs
         re.compile(r'[{}]'),                    # code
         re.compile(r'^\s*[\*\-\•]\s'),         # listes à puces
@@ -77,7 +80,7 @@ class WhitepaperExtractor:
 
     def __init__(
         self,
-        llm_model: str = "gemma4:31b-cloud",
+        llm_model: str = "WhitepaperConfig.LLM_MODEL",
         output_dir: Optional[str] = None,
         llm_temperature: float = 0.0,
         body_size_cap: float = 15.0,
@@ -113,7 +116,7 @@ class WhitepaperExtractor:
 
         # JSON — pour le pipeline downstream
         json_data = [
-            {"title": s.title, "level": s.level, "page": s.page}
+            {"title": s.title, "level": s.level, "page": s.page, "size": s.size}
             for s in sections
         ]
         with open(self.output_dir / f"{uuid}.json", "w", encoding="utf-8") as f:
@@ -133,7 +136,7 @@ class WhitepaperExtractor:
         with open(self.output_dir / f"{uuid}.json", encoding="utf-8") as f:
             data = json.load(f)
         return [
-            Section(title=d["title"], level=d["level"], page=d["page"])
+            Section(title=d["title"], level=d["level"], page=d["page"], size=d["size"])
             for d in data
         ]
 
@@ -145,15 +148,31 @@ class WhitepaperExtractor:
         try:
             toc = doc.get_toc()
             if toc and len(toc) >= self.min_toc_entries:
+                lines = self._reconstruct_lines(doc)
+
                 sections = []
                 for level, title, page_num in toc:
                     clean_title = " ".join(title.split())
-                    if clean_title:
-                        sections.append(Section(
-                            title=clean_title,
-                            level=min(level, 3),
-                            page=page_num
-                        ))
+                    if not clean_title:
+                        continue
+
+                    # Recherche de la taille sur la page indiquée
+                    page_lines = [l for l in lines if l["page"] == page_num]
+                    norm_title = " ".join(clean_title.lower().split())
+                    size = 0.0
+
+                    for line in page_lines:
+                        norm_line = " ".join(line["text"].lower().split())
+                        if norm_line == norm_title:
+                            size = line["size"]
+                            break
+
+                    sections.append(Section(
+                        title=clean_title,
+                        level=min(level, 3),
+                        page=page_num,
+                        size=size
+                    ))
                 return sections
         except Exception:
             pass
@@ -416,11 +435,18 @@ class WhitepaperExtractor:
                 return None
             
             data = json.loads(raw[start:end+1])
+
+            candidate_map = {
+                " ".join(c.text.lower().split()): c.size
+                for c in candidates
+                }
+            
             return [
                 Section(
                     title=item["title"],
                     level=item.get("level", 2),
-                    page=item.get("page", 0)
+                    page=item.get("page", 0),
+                    size=candidate_map.get(" ".join(item["title"].lower().split()), 0.0)
                 )
                 for item in data
                 if "title" in item
