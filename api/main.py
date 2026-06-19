@@ -1,6 +1,9 @@
 import os
+
+import uvicorn
 from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
+
 from api.routers import whitepaper_router
 from core_shared.config import init_storage_directories, API_HOST, API_PORT
 
@@ -22,5 +25,4 @@ def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("api.main:app", host=API_HOST, port=API_PORT, reload=True)

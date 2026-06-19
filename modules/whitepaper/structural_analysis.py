@@ -1,59 +1,102 @@
-# modules/whitepaper/structural_analysis.py
 import re
-import textstat
+import logging
+
+import textstat # type: ignore[import]
+
 from core_shared.config import WhitepaperConfig
 
-_AI_DESC_PATTERN = re.compile(r'<AI img description>.*?</AI img description>', re.DOTALL)
-_NO_IMG_SAVED_IN_OLLAMA = re.compile(r'\*\*==>\s*picture\s*\[\d+\s*x\s*\d+\]\s*intentionally\s*omitted\s*<==\*\*')
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level patterns
+# ---------------------------------------------------------------------------
+
+_AI_DESC_PATTERN = re.compile(
+    r"<AI img description>.*?</AI img description>",
+    re.DOTALL
+)
+_OMITTED_PICTURE_PATTERN = re.compile(
+    r"\*\*==>\s*picture\s*\[\d+\s*x\s*\d+\]\s*intentionally\s*omitted\s*<==\*\*"
+)
+_UUID_V4_PATTERN = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
+)
+
+# ---------------------------------------------------------------------------
+# Text cleaning
+# ---------------------------------------------------------------------------
 
 def _clean_text_for_nlp(md_content: str) -> str:
-    """Prépare le texte pour les analyses NLP en supprimant la pollution structurelle."""
-    text = _AI_DESC_PATTERN.sub('', md_content)
-    text = _NO_IMG_SAVED_IN_OLLAMA.sub('', text)
-    text = re.compile(r'!\[[^\]]*\]\([^\)]*\)').sub('', text)
-    text = re.compile(r'\[([^\]]*)\]\([^\)]*\)').sub(r'\1', text)
-    text = re.compile(r'[|#*`\-_]').sub(' ', text)
-    return re.compile(r'\s+').sub(' ', text).strip()
+    """Strip structural noise from Markdown content before NLP analysis.
+
+    Args:
+        md_content: Raw Markdown string to clean.
+
+    Returns:
+        A plain-text string with images, links, and Markdown syntax removed.
+    """
+    text = _AI_DESC_PATTERN.sub("", md_content)
+    text = _OMITTED_PICTURE_PATTERN.sub("", text)
+    text = re.sub(r"!\[[^\]]*\]\([^\)]*\)", "", text)
+    text = re.sub(r"\[([^\]]*)\]\([^\)]*\)", r"\1", text)
+    text = re.sub(r"[|#*`\-_]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+# ---------------------------------------------------------------------------
+# Structural metrics
+# ---------------------------------------------------------------------------
 
 def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> dict:
+    """Compute structural metrics on the cleaned text of a whitepaper document.
+
+    Args:
+        uuid: UUID v4 identifier of the document to analyse.
+        include_images_stats: When ``True``, image count and total size are
+            included in the returned dictionary; ``None`` values are used when
+            the image directory does not exist.
+
+    Returns:
+        A dictionary of structural metrics keyed by metric name, including
+        the document UUID.
+
+    Raises:
+        ValueError: If *uuid* does not match the UUID v4 format.
+        FileNotFoundError: If no Markdown file exists for the given UUID.
     """
-    Calcule les métriques structurelles sur le texte épuré du document.
-    Renvoie un dictionnaire incluant l'UUID du document traité.
-    """
-    if not re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}', uuid):
-        raise ValueError(f"UUID invalide : {uuid!r}")
+    if not _UUID_V4_PATTERN.fullmatch(uuid):
+        raise ValueError(f"Invalid UUID format : {uuid!r}")
     
     md_path = WhitepaperConfig.MD_DIR / f"{uuid}.md"
     img_dir = WhitepaperConfig.IMG_DIR / uuid
 
     if not md_path.exists():
-        raise FileNotFoundError(f"Markdown introuvable pour UUID: {uuid}")
+        raise FileNotFoundError(f"Markdown file not found for UUID: {uuid}")
 
     md_content = md_path.read_text(encoding="utf-8")
     clean_text = _clean_text_for_nlp(md_content)
-    
     words = clean_text.split()
     word_count = len(words)
     text_size_bytes = len(md_content.encode("utf-8"))
 
-    gunning_fog, flesch_reading_ease, sentence_count, syllable_count = 0.0, 0.0, 0, 0
+    sentence_count: int = 0
+    syllable_count: int = 0
+    gunning_fog: float = 0.0
+    flesch_reading_ease: float = 0.0
 
     if word_count > 0:
         try:
-            sentence_count = textstat.sentence_count(clean_text) #type:ignore (just pylance shenigans)
-            syllable_count = textstat.syllable_count(clean_text) #type:ignore
-            gunning_fog = textstat.gunning_fog(clean_text) #type:ignore
-            flesch_reading_ease = textstat.flesch_reading_ease(clean_text) #type:ignore
-        except Exception as nlp_err:
-            # Remplacement du print par un log si nécessaire, ou maintien du warning
-            print(f"[WARNING] Échec textstat sur l'UUID {uuid} : {nlp_err}")
+            sentence_count = textstat.sentence_count(clean_text)                     # type: ignore[assignment]
+            syllable_count = textstat.syllable_count(clean_text)                     # type: ignore[assignment]
+            gunning_fog = textstat.gunning_fog(clean_text)                           # type: ignore[assignment]
+            flesch_reading_ease = textstat.flesch_reading_ease(clean_text)           # type: ignore[assignment]
+        except Exception as e: # noqa: BLE001
+            logger.warning("textstat failed for UUID %s: %s", uuid, e)
 
-    total_chars_in_words = sum(len(word) for word in words)
-    avg_word_len = round(total_chars_in_words / word_count, 2) if word_count > 0 else 0.0
+    avg_word_len = (
+        round(sum(len(w) for w in words) / word_count, 2) if word_count > 0 else 0.0
+    )   
 
-    img_stats = {} #The dictionary is initialized empty to ensure that the default value is None, 
-    # if the user does not want to include image stats or if the image directory does not exist. 
-    # This way, we avoid returning misleading zero values for image stats when they are not requested or not available.
+    img_stats: dict = {} 
     if include_images_stats:
         if img_dir.exists():
             img_files = [f for f in img_dir.iterdir() if f.is_file()]
@@ -61,21 +104,19 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
                 "image_count": len(img_files),
                 "images_total_size_bytes": sum(f.stat().st_size for f in img_files),
             }
-
         else:
             img_stats = {
                 "image_count": None,
                 "images_total_size_bytes": None,
-                }
-
+            }
     return {
-        "uuid": uuid,  # <-- L'UUID est nativement ancré ici
+        "uuid": uuid,
         "text_size_bytes": text_size_bytes,
         "word_count": word_count,
         "sentence_count": sentence_count,
         "syllable_count": syllable_count,
         "avg_word_length": avg_word_len,
-        "gunning_fog_index":  round(gunning_fog, 2) if gunning_fog > 0 else None,
-        "flesch_reading_ease": round(flesch_reading_ease, 2) if flesch_reading_ease  > 0 else None,
+        "gunning_fog_index": round(gunning_fog, 2) if gunning_fog > 0 else None,
+        "flesch_reading_ease": round(flesch_reading_ease, 2) if flesch_reading_ease > 0 else None,
         **img_stats,
     }

@@ -16,6 +16,7 @@ markdown_subdir = "markdowns"
 images_subdir = "images"
 tocs_subdir = "tocs"
 model = "gemma4:31b-cloud"
+vision_model = "gemma4:31b-cloud"
 
 [tokenomics]
 # For tokenomics data, settings in the future.
