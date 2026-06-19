@@ -12,6 +12,7 @@ wheels/
 # Files that should not be tracked
 storage/
 data/
+storage/index_registry.csv
 
 # Environment & secrets
 .env
