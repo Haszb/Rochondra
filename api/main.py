@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,12 +11,24 @@ from starlette.middleware.sessions import SessionMiddleware
 from api.routers import whitepaper_router
 from core_shared.config import API_HOST, API_PORT, SESSION_SECRET_KEY
 from db.object_store.whitepaper import list_pdf_uuids_in_temp
+from db.sql.base import Base, engine
+from db.sql.whitepaper import (
+    models,  # noqa: F401  (registers ORM models on Base.metadata)
+)
 
 logger = logging.getLogger("rochondra.startup")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Postgres schema is up to date.")
+    except Exception as e:  # noqa: BLE001
+        # Not fatal: the extract / TOC / sentiment stages don't touch Postgres,
+        # so the API stays usable. Only /finalize's SAVE branch will fail.
+        logger.warning("Could not create Postgres tables at startup: %s", e)
+
     try:
         uuids = list_pdf_uuids_in_temp()
     except Exception as e:  # noqa: BLE001
