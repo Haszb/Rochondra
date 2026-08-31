@@ -3,9 +3,9 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-DATABASE_URL = "postgresql+psycopg://rochondra:devpassword@localhost:5432/rochondra"
+from core_shared.config import PostgresConfig
 
-engine = create_engine(DATABASE_URL, echo=True)  # echo=True utile en dev, à retirer en prod
+engine = create_engine(PostgresConfig.URL, echo=PostgresConfig.ECHO_SQL)
 SessionLocal = sessionmaker(bind=engine)
 
 Base = declarative_base()

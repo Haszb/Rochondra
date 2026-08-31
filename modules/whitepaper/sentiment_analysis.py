@@ -17,6 +17,7 @@ from transformers import (  # type: ignore[import]
     pipeline,
 )
 
+from core_shared.config import WhitepaperConfig
 from db.object_store.whitepaper import (
     download_markdown_from_temp,
     get_json_from_temp,
@@ -33,14 +34,14 @@ logger = logging.getLogger(__name__)
 
 _sentiment_pipeline = pipeline(
     "text-classification",
-    model="ProsusAI/finbert",
+    model=WhitepaperConfig.SENTIMENT_MODEL,
     top_k=None,
     truncation=True,
     max_length=512,
 )
 
-_summarizer_tokenizer = AutoTokenizer.from_pretrained("sshleifer/distilbart-cnn-12-6")
-_summarizer_model = AutoModelForSeq2SeqLM.from_pretrained("sshleifer/distilbart-cnn-12-6")
+_summarizer_tokenizer = AutoTokenizer.from_pretrained(WhitepaperConfig.SUMMARIZER_MODEL)
+_summarizer_model = AutoModelForSeq2SeqLM.from_pretrained(WhitepaperConfig.SUMMARIZER_MODEL)
 
 
 @atexit.register

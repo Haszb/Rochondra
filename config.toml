@@ -1,17 +1,51 @@
+# Rochondra configuration.
+#
+# Non-secret settings live here and are committed. Secrets (passwords, keys)
+# live in `.env`, which is not — see `.env.example` for the expected keys.
+#
+# DEPLOYMENT: `main_url` is the single knob. Every service URL is derived from
+# it as `{main_url}:{port}`, so pointing the project at another machine means
+# changing this one line. Individual services can still be overridden per-host
+# via the optional *_HOST variables in `.env` (useful for a managed database).
+
 [global]
 environment = "development"
+main_url    = "http://localhost"   # scheme + host, no port, no trailing slash
 
 [api]
-host = "127.0.0.1"
-port = 8000
+port   = 8000
+prefix = "/api"
 
 [ui]
-host = "127.0.0.1"
 port = 8501
 
+[postgres]
+port     = 5432
+database = "rochondra"
+driver   = "postgresql+psycopg"
+echo_sql = true                    # verbose SQL logging; set false outside dev
+
+[redis]
+port                = 6379
+db                  = 0
+default_ttl_seconds = 3600
+
+[minio]
+port             = 9000
+console_port     = 9001
+secure           = false           # true when MinIO is behind HTTPS
+temp_bucket      = "temp-bucket"
+documents_bucket = "documents-bucket"
+
+[ollama]
+port = 11434
+
 [whitepaper]
-model = "gemma4:31b-cloud"
-vision_model = "gemma4:31b-cloud"
+model            = "gemma4:31b-cloud"
+vision_model     = "gemma4:31b-cloud"
+sentiment_model  = "ProsusAI/finbert"
+summarizer_model = "sshleifer/distilbart-cnn-12-6"
+max_upload_mb    = 50
 
 [tokenomics]
 # For tokenomics data, settings in the future.

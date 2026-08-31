@@ -38,7 +38,7 @@ router = APIRouter(prefix="/whitepaper", tags=["Whitepaper"])
 
 _section_analyzer = SectionAnalyzer()
 
-_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+_MAX_FILE_SIZE = WhitepaperConfig.MAX_UPLOAD_BYTES
 
 
 # ---------------------------------------------------------------------------

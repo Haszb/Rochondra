@@ -1,14 +1,12 @@
 from minio import Minio
 
-MINIO_ENDPOINT = "localhost:9000"
-MINIO_ACCESS_KEY = "rochondra"
-MINIO_SECRET_KEY = "devpassword123"
+from core_shared.config import MinioConfig
 
 client = Minio(
-    MINIO_ENDPOINT,
-    access_key=MINIO_ACCESS_KEY,
-    secret_key=MINIO_SECRET_KEY,
-    secure=False,  # True en prod avec HTTPS
+    MinioConfig.ENDPOINT,
+    access_key=MinioConfig.ACCESS_KEY,
+    secret_key=MinioConfig.SECRET_KEY,
+    secure=MinioConfig.SECURE,
 )
 
 

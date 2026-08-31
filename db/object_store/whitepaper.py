@@ -7,10 +7,11 @@ from pathlib import Path
 from minio.commonconfig import CopySource
 from minio.error import S3Error
 
+from core_shared.config import MinioConfig
 from db.object_store.client import client, ensure_bucket
 
-TEMP_BUCKET = "temp-bucket"
-DOCUMENTS_BUCKET = "documents-bucket"
+TEMP_BUCKET = MinioConfig.TEMP_BUCKET
+DOCUMENTS_BUCKET = MinioConfig.DOCUMENTS_BUCKET
 
 
 def upload_pdf_to_temp(uuid: str, pdf_path: Path | str) -> None:

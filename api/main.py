@@ -1,5 +1,4 @@
 import logging
-import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -8,7 +7,7 @@ from fastapi.openapi.utils import get_openapi
 from starlette.middleware.sessions import SessionMiddleware
 
 from api.routers import whitepaper_router
-from core_shared.config import API_HOST, API_PORT
+from core_shared.config import API_HOST, API_PORT, SESSION_SECRET_KEY
 from db.object_store.whitepaper import list_pdf_uuids_in_temp
 
 logger = logging.getLogger("rochondra.startup")
@@ -36,7 +35,7 @@ app = FastAPI(title="Rochondra Core API", lifespan=lifespan)
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET_KEY", "change-me-in-production-use-env-var"),
+    secret_key=SESSION_SECRET_KEY,
     https_only=False,
     same_site="lax",
 )

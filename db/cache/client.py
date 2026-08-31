@@ -2,17 +2,18 @@ from typing import Optional
 
 import redis
 
-REDIS_HOST = "127.0.0.1"
-REDIS_PORT = 6379
+from core_shared.config import RedisConfig
 
 client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
+    host=RedisConfig.HOST,
+    port=RedisConfig.PORT,
+    db=RedisConfig.DB,
+    password=RedisConfig.PASSWORD,
     decode_responses=True,
     socket_connect_timeout=3,
 )
 
-DEFAULT_TTL_SECONDS = 3600  # 1h
+DEFAULT_TTL_SECONDS = RedisConfig.DEFAULT_TTL_SECONDS
 
 
 def cache_set(key: str, value: str, ttl: Optional[int] = DEFAULT_TTL_SECONDS) -> None:

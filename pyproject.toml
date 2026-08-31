@@ -125,6 +125,7 @@ dependencies = [
     "pyphen==0.17.2",
     "pysentiment2==0.1.1",
     "python-dateutil==2.9.0.post0",
+    "python-dotenv>=1.2.3",
     "python-json-logger==4.1.0",
     "python-multipart==0.0.29",
     "pyyaml==6.0.3",
