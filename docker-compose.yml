@@ -1,0 +1,70 @@
+# Development stack for Rochondra: Postgres, Redis and MinIO.
+#
+# The API and the Streamlit UI are deliberately NOT containerised yet — they
+# run on the host via `scripts/dev.sh`.
+#
+# Credentials are substituted from `.env`, the same file the application reads,
+# so there is one source of truth for them. Ports and the database name are
+# literals here because Compose cannot read `config.toml`; if you change them
+# in config.toml, change them here too.
+#
+#     docker compose up -d --wait     # start, block until healthy
+#     docker compose down             # stop, keep data
+#     docker compose down -v          # stop, wipe data
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: rochondra-postgres-dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: rochondra          # must match [postgres].database in config.toml
+    ports:
+      - "5432:5432"                   # must match [postgres].port
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: rochondra-redis-dev
+    ports:
+      - "6379:6379"                   # must match [redis].port
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio
+    container_name: rochondra-minio-dev
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?set MINIO_ACCESS_KEY in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}
+    ports:
+      - "9000:9000"                   # must match [minio].port
+      - "9001:9001"                   # must match [minio].console_port
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
