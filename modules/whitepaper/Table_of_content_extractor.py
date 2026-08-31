@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import json
 import logging
 import re
@@ -6,12 +8,15 @@ from pathlib import Path
 from statistics import mode
 from typing import Optional
 
-
-
 import ollama
 import pymupdf
 
 from core_shared.config import WhitepaperConfig
+from db.object_store.whitepaper import (
+    get_json_from_temp,
+    json_exists_in_temp,
+    upload_json_to_temp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +76,7 @@ class WhitepaperExtractor:
         3. LLM arbitration               (Gemma on ambiguous candidates)
         4. Heuristic fallback            (if LLM fails)
 
-    Each result is persisted as JSON and Markdown under ``output_dir``.
+    Each result is persisted as JSON in MinIO.
     Already-processed documents are skipped automatically.
     """
     # Noisy fonts excluded unconditionally from heading detection.
@@ -95,7 +100,6 @@ class WhitepaperExtractor:
     def __init__(
         self,
         llm_model: str = WhitepaperConfig.LLM_MODEL,
-        output_dir: Optional[str] = None,
         llm_temperature: float = 0.0,
         body_size_cap: float = 15.0,
         size_ratio_h1: float = 1.5,
@@ -111,50 +115,29 @@ class WhitepaperExtractor:
         self.max_title_words = max_title_words
         self.min_toc_entries = min_toc_entries
 
-        self.output_dir = Path(output_dir) if output_dir else None
-        if self.output_dir:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-
     # ---------------------------------------------------------------------------
     # Persistence
     # ---------------------------------------------------------------------------
 
     def _already_processed(self, uuid: str) -> bool:
-        """Return ``True`` if a JSON result file already exists for the given UUID."""
-        if not self.output_dir:
-            return False
-        return (self.output_dir / f"{uuid}.json").exists()
+        """Return ``True`` if a TOC result already exists in the object store."""
+        return json_exists_in_temp(uuid, "toc")
 
     def _save(self, uuid: str, sections: list[Section]) -> None:
-        """Persist extracted sections to JSON and Markdown files."""
-        if not self.output_dir:
-            return
-
+        """Persist extracted sections as JSON in the object store."""
         json_data = [
             {"title": s.title, "level": s.level, "page": s.page, "size": s.size}
             for s in sections
         ]
-        with open(self.output_dir / f"{uuid}.json", "w", encoding="utf-8") as f:
-            json.dump(json_data, f, ensure_ascii=False, indent=2)
-        
-        md_lines = [f"# Table of contents: {uuid}\n"]
-        for s in sections:
-            indent = "  " * (s.level - 1)
-            md_lines.append(f"{indent}{'#' * s.level} {s.title}  (p.{s.page})")
-        with open(self.output_dir / f"{uuid}.md", "w", encoding="utf-8") as f:
-            f.write("\n".join(md_lines))
+        upload_json_to_temp(uuid, "toc", json_data)
 
     def _load(self, uuid: str) -> list[Section]:
-        """Load previously persisted sections from the JSON file for the given UUID."""
-        if not self.output_dir:
-            return []
-        with open(self.output_dir / f"{uuid}.json", encoding="utf-8") as f:
-            data = json.load(f)
+        """Load previously persisted sections from the object store."""
+        data = get_json_from_temp(uuid, "toc")
         return [
             Section(title=d["title"], level=d["level"], page=d["page"], size=d["size"])
             for d in data
         ]
-
     # ---------------------------------------------------------------------------
     # Native PDF table of contents
     # ---------------------------------------------------------------------------
@@ -522,27 +505,29 @@ class WhitepaperExtractor:
     def extract(
         self,
         uuid: str,
-        use_llm: bool = True
+        pdf_path: Path | str,
+        use_llm: bool = True,
     ) -> list[Section]:
         """Extract the structured outline of a whitepaper PDF.
 
         Args:
             uuid: UUID of the document to process.
+            pdf_path: Explicit path to the PDF file.
             use_llm: When ``False``, returns the raw heuristic result
                 without calling the LLM arbitration step.
 
         Returns:
             A list of :class:`Section` objects ordered by appearance.
         """
-        pdf_path = WhitepaperConfig.PDF_DIR / f"{uuid}.pdf"
-        if not pdf_path.exists():
+        resolved_pdf_path = Path(pdf_path)
+        if not resolved_pdf_path.exists():
             raise FileNotFoundError(f"PDF not found for UUID: {uuid}")
 
         if self._already_processed(uuid):
             logger.info("skip (already processed)")
             return self._load(uuid)
 
-        with pymupdf.open(pdf_path) as doc:
+        with pymupdf.open(resolved_pdf_path) as doc:
 
             native = self._get_native_toc(doc)
             if native:

@@ -1,89 +1,53 @@
+#!/usr/bin/env python3
+
 import asyncio
+import json
 import logging
-import re
-import shutil
 import tempfile
-import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from filelock import FileLock
 
 from api.schemas import (
     ExtractionResponse,
+    FinalizeResponse,
+    ResumeSessionResponse,
     SentimentAnalysisResponse,
     StructuralAnalysisResponse,
     TocExtractionResponse,
 )
 from core_shared.config import WhitepaperConfig
-from modules.whitepaper.Table_of_content_extractor import WhitepaperExtractor
-from modules.whitepaper.extractor import pdf_to_semantic_markdown, save_pipeline_outputs
+from db.cache.client import cache_delete, cache_get, cache_set
+from db.object_store.whitepaper import (
+    download_pdf_from_temp,
+    list_pdf_uuids_in_temp,
+    move_artifacts_from_temp_to_documents,
+)
+from db.sql.whitepaper.repository import persist_structural_analysis
+from modules.whitepaper.extractor import stage_document
 from modules.whitepaper.sentiment_analysis import SectionAnalyzer
 from modules.whitepaper.structural_analysis import compute_structural_metrics
-
+from modules.whitepaper.Table_of_content_extractor import WhitepaperExtractor
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/whitepaper", tags=["Whitepaper"])
 
-_section_analyzer = SectionAnalyzer(output_dir=str(WhitepaperConfig.ANALYSIS_DIR))
+_section_analyzer = SectionAnalyzer()
 
 _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 # ---------------------------------------------------------------------------
 # Registry helpers
-# Temporary CSV-based persistence; will be replaced by database interactions.
+# Metadata for a staged document lives in Redis under ``metadata:{uuid}``
+# (no TTL) between /extract and /finalize; /finalize copies it into Postgres
+# and drops the Redis key.
 # ---------------------------------------------------------------------------
 
-def _append_to_registry(entry: dict) -> None:
-    """Append a new entry to the CSV registry."""
-    registry_path = WhitepaperConfig.REGISTRY_PATH
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with FileLock(str(registry_path) + ".lock", timeout=10):
-        df_new = pd.DataFrame([entry])
-        if registry_path.exists() and registry_path.stat().st_size > 0:
-            df = pd.concat([pd.read_csv(registry_path), df_new], ignore_index=True)
-        else:
-            df = df_new
-        df.to_csv(registry_path, index=False)
-
-
-def _update_analysis_to_registry(metrics: dict) -> None:
-    """Update an existing registry row with computed metrics.
-
-    Args:
-        metrics: Dictionary of metrics including a ``uuid`` key identifying
-            the row to update. A new row is appended if the UUID is absent.
-
-    Raises:
-        KeyError: If *metrics* does not contain a ``uuid`` key.
-    """
-    registry_path = WhitepaperConfig.REGISTRY_PATH
-    registry_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with FileLock(str(registry_path) + ".lock", timeout=10):
-        if registry_path.exists() and registry_path.stat().st_size > 0:
-            df = pd.read_csv(registry_path)
-        else:
-            df = pd.DataFrame()
-
-        target_uuid = metrics.get("uuid")
-        if not target_uuid:
-            raise KeyError("The metrics dictionary does not contain a valid 'uuid' key.")
-
-        if "uuid" in df.columns and target_uuid in df["uuid"].values:
-            mask = df["uuid"] == target_uuid
-            update_dict = {k: v for k, v in metrics.items() if k != "uuid"}
-            df.loc[mask, update_dict.keys()] = pd.Series(update_dict)
-        else:
-            df = pd.concat([df, pd.DataFrame([metrics])], ignore_index=True)
-
-        df.to_csv(registry_path, index=False)
+_METADATA_KEY = "metadata:{uuid}"
 
 
 def _get_current_uuid(request: Request) -> str:
@@ -119,7 +83,7 @@ async def extract_document(
     save_markdown: bool = Form(...),
     project_name: str = Form(default=""),
 ) -> ExtractionResponse:
-    """Extract and persist a PDF whitepaper, returning its Markdown content."""
+    """Extract a PDF whitepaper and stage its outputs in MinIO, returning its Markdown content."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename.")
 
@@ -139,64 +103,39 @@ async def extract_document(
         )
 
     try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_dir_path = Path(temp_dir)
-            safe_filename = re.sub(r"[^\w\-.]", "_", file.filename)
-            pdf_path = temp_dir_path / safe_filename
-            output_md = temp_dir_path / "output.md"
-            img_dir = temp_dir_path / "images_tmp"
+        generated_uuid, markdown_content = await asyncio.to_thread(
+            stage_document,
+            file_content=file_content,
+            filename=file.filename,
+            extract_images=extract_images,
+        )
 
-            pdf_path.write_bytes(file_content)
+        metadata = {
+            "uuid": generated_uuid,
+            "project_name": (project_name or Path(file.filename).stem).strip() or "Unknown",
+            "filename": file.filename,
+            "file_size_mb": round(len(file_content) / (1024 * 1024), 2),
+            "status": "success",
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
+            "marked_for_deletion": not save_markdown,
+        }
+        await asyncio.to_thread(
+            cache_set,
+            _METADATA_KEY.format(uuid=generated_uuid),
+            json.dumps(metadata),
+            None,
+        )
 
-            markdown_content = await asyncio.to_thread(
-                pdf_to_semantic_markdown,
-                pdf_path=str(pdf_path),
-                output_md=str(output_md),
-                img_dir=str(img_dir),
-                extract_images=extract_images,
-            )
+        request.session["current_uuid"] = generated_uuid
+        request.session["current_project"] = project_name or Path(file.filename).stem
 
-            generated_uuid = str(uuid.uuid4())
-
-            final_pdf_path = WhitepaperConfig.PDF_DIR / f"{generated_uuid}.pdf"
-            final_md_path = WhitepaperConfig.MD_DIR / f"{generated_uuid}.md"
-            final_img_dir = WhitepaperConfig.IMG_DIR / generated_uuid
-
-            for p in [final_pdf_path, final_md_path, final_img_dir]:
-                p.parent.mkdir(parents=True, exist_ok=True)
-
-            shutil.copy2(src=pdf_path, dst=final_pdf_path)
-
-            save_status = save_pipeline_outputs(
-                md_content=markdown_content,
-                final_md_path=str(final_md_path),
-                temp_img_dir=str(img_dir),
-                final_img_dir=str(final_img_dir),
-            )
-
-            if not save_status:
-                raise HTTPException(status_code=500, detail="Failed to persist output files.")
-
-            _append_to_registry({
-                "uuid": generated_uuid,
-                "project_name": (project_name or Path(file.filename).stem).strip() or "Unknown",
-                "filename": file.filename,
-                "file_size_mb": round(len(file_content) / (1024 * 1024), 2),
-                "status": "success",
-                "analyzed_at": datetime.now(timezone.utc).isoformat(),
-                "marked_for_deletion": not save_markdown,
-            })
-
-            request.session["current_uuid"] = generated_uuid
-            request.session["current_project"] = project_name or Path(file.filename).stem
-
-            return ExtractionResponse(
-                status="success",
-                extract_images=extract_images,
-                save_markdown=save_markdown,
-                doc_uuid=generated_uuid,
-                markdown_content=markdown_content,
-            )
+        return ExtractionResponse(
+            status="success",
+            extract_images=extract_images,
+            save_markdown=save_markdown,
+            doc_uuid=generated_uuid,
+            markdown_content=markdown_content,
+        )
 
     except HTTPException:
         raise
@@ -219,14 +158,19 @@ async def analyze_document_structure(
             uuid=doc_uuid,
             include_images_stats=include_images_stats,
         )
-        await asyncio.to_thread(_update_analysis_to_registry, metrics=metrics)
+        metrics_dict = asdict(metrics)
 
-        return StructuralAnalysisResponse(
+        response = StructuralAnalysisResponse(
             status="success",
             uuid=doc_uuid,
-            metrics=metrics,
-            saved_to_registry=True,
+            metrics=metrics_dict,
         )
+
+        await asyncio.to_thread(
+            cache_set, f"structural_analysis:{doc_uuid}", response.model_dump_json()
+        )
+
+        return response
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -242,26 +186,31 @@ async def extract_toc(request: Request) -> TocExtractionResponse:
 
     extractor = WhitepaperExtractor(
         llm_model=WhitepaperConfig.LLM_MODEL,
-        output_dir=WhitepaperConfig.TOCS_DIR,
     )
 
+    def _download_and_extract() -> list:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_pdf_path = Path(temp_dir) / f"{doc_uuid}.pdf"
+            download_pdf_from_temp(doc_uuid, temp_pdf_path)
+            return extractor.extract(uuid=doc_uuid, pdf_path=temp_pdf_path, use_llm=True)
+
     try:
-        sections = await asyncio.to_thread(
-            extractor.extract,
-            uuid=doc_uuid,
-            use_llm=True,
-        )
+        sections = await asyncio.to_thread(_download_and_extract)
 
         toc_data = "".join(
             f"{'  ' * (s.level - 1)}{'#' * s.level} {s.title}  (p.{s.page})\n"
             for s in sections
         )
 
-        return TocExtractionResponse(
+        response = TocExtractionResponse(
             status="success",
             uuid=doc_uuid,
             toc_content=toc_data,
         )
+
+        await asyncio.to_thread(cache_set, f"toc_extraction:{doc_uuid}", response.model_dump_json())
+
+        return response
 
     except FileNotFoundError:
         raise HTTPException(
@@ -286,12 +235,17 @@ async def analyze_sentiment(request: Request) -> SentimentAnalysisResponse:
 
         payload = {title: asdict(analysis) for title, analysis in results.items()}
 
-        return SentimentAnalysisResponse(
+        response = SentimentAnalysisResponse(
             status="success",
             uuid=doc_uuid,
             analyses=payload,  # type: ignore[arg-type]
-            saved_to_registry=True,
         )
+
+        await asyncio.to_thread(
+            cache_set, f"sentiment_analysis:{doc_uuid}", response.model_dump_json()
+        )
+
+        return response
 
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -301,3 +255,99 @@ async def analyze_sentiment(request: Request) -> SentimentAnalysisResponse:
             status_code=500,
             detail="Internal error during sentiment analysis.",
         )
+
+
+@router.post("/resume", response_model=ResumeSessionResponse)
+async def resume_session(
+    request: Request,
+    uuid: str | None = None,
+) -> ResumeSessionResponse:
+    """List staged documents and optionally bind one to the current session.
+
+    Without a ``uuid`` query parameter, returns the list of staged UUIDs so a
+    caller can pick one. With a ``uuid``, verifies it is staged in MinIO and
+    binds it to the session — skipping a fresh ``/extract`` upload.
+
+    The full ``available_uuids`` list is always returned, so the caller can
+    refresh its picker in the same round-trip.
+    """
+    available = await asyncio.to_thread(list_pdf_uuids_in_temp)
+
+    if uuid is None:
+        return ResumeSessionResponse(status="success", available_uuids=available)
+
+    if uuid not in available:
+        raise HTTPException(status_code=404, detail=f"No staged PDF found for UUID: {uuid}")
+
+    request.session["current_uuid"] = uuid
+    return ResumeSessionResponse(status="success", uuid=uuid, available_uuids=available)
+
+
+@router.post("/finalize", response_model=FinalizeResponse)
+async def finalize_document(
+    request: Request,
+    uuid: str | None = None,
+) -> FinalizeResponse:
+    """Persist a document's ephemeral state to durable storage.
+
+    Prefers the session's ``current_uuid`` when one is set (typical during an
+    interactive workflow); otherwise requires a ``uuid`` query parameter
+    (typical for batch/cron calls without a session).
+    """
+    session_uuid = request.session.get("current_uuid")
+    uuid = session_uuid or uuid
+    if not uuid:
+        raise HTTPException(
+            status_code=400,
+            detail="No UUID provided and no document in session.",
+        )
+
+    structural_raw = await asyncio.to_thread(cache_get, f"structural_analysis:{uuid}")
+    if structural_raw is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No cached structural analysis found for UUID: {uuid}",
+        )
+
+    metadata_raw = await asyncio.to_thread(cache_get, _METADATA_KEY.format(uuid=uuid))
+    if metadata_raw is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No cached metadata found for UUID: {uuid}",
+        )
+
+    try:
+        metrics = json.loads(structural_raw).get("metrics", {})
+        metadata = json.loads(metadata_raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Corrupted cache payload.")
+
+    try:
+        await asyncio.to_thread(persist_structural_analysis, uuid, metrics, metadata)
+    except Exception as e:
+        logger.exception("Failed to persist structural analysis to Postgres for %s", uuid)
+        raise HTTPException(status_code=500, detail=f"Postgres write failed: {e}")
+
+    try:
+        moved = await asyncio.to_thread(move_artifacts_from_temp_to_documents, uuid)
+    except Exception as e:
+        logger.exception("Failed to move MinIO artifacts for %s", uuid)
+        raise HTTPException(status_code=500, detail=f"MinIO move failed: {e}")
+
+    await asyncio.to_thread(
+        cache_delete,
+        _METADATA_KEY.format(uuid=uuid),
+        f"structural_analysis:{uuid}",
+        f"toc_extraction:{uuid}",
+        f"sentiment_analysis:{uuid}",
+    )
+
+    if request.session.get("current_uuid") == uuid:
+        request.session.pop("current_uuid", None)
+        request.session.pop("current_project", None)
+
+    return FinalizeResponse(
+        status="success",
+        uuid=uuid,
+        persisted=["postgres:whitepaper", "postgres:fact_structural", *moved],
+    )

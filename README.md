@@ -85,6 +85,10 @@ Storage directories are created automatically on first run under `storage/`.
 
 Open two terminals from the project root.
 
+docker start rochondra-redis-dev rochondra-postgres-dev rochondra-minio-dev
+docker exec -it rochondra-postgres-dev psql -U rochondra -d rochondra
+
+
 **Terminal 1 — API:**
 ```bash
 uv run uvicorn api.main:app --reload

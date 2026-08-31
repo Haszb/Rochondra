@@ -1,11 +1,35 @@
-import re
+#!/usr/bin/env python3
+
 import logging
+import re
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
 
-import textstat # type: ignore[import]
+import textstat  # type: ignore[import]
 
-from core_shared.config import WhitepaperConfig
+from db.object_store.whitepaper import (
+    download_images_from_temp,
+    download_markdown_from_temp,
+)
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class StructuralMetrics:
+    """Structural metrics computed for a whitepaper document."""
+
+    uuid: str
+    text_size_bytes: int
+    word_count: int
+    sentence_count: int
+    syllable_count: int
+    avg_word_length: float
+    gunning_fog_index: Optional[float]
+    flesch_reading_ease: Optional[float]
+    image_count: Optional[int] = None
+    images_total_size_bytes: Optional[int] = None
 
 # ---------------------------------------------------------------------------
 # Module-level patterns
@@ -46,31 +70,29 @@ def _clean_text_for_nlp(md_content: str) -> str:
 # Structural metrics
 # ---------------------------------------------------------------------------
 
-def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> dict:
-    """Compute structural metrics on the cleaned text of a whitepaper document.
+
+def _compute_metrics_from_files(
+    doc_uuid: str,
+    md_path: Path,
+    img_dir: Optional[Path],
+    include_images_stats: bool,
+) -> StructuralMetrics:
+    """Compute structural metrics from an already-downloaded markdown file.
 
     Args:
-        uuid: UUID v4 identifier of the document to analyse.
-        include_images_stats: When ``True``, image count and total size are
-            included in the returned dictionary; ``None`` values are used when
-            the image directory does not exist.
+        doc_uuid: UUID of the document, used to tag the resulting metrics.
+        md_path: Path to a local markdown file.
+        img_dir: Path to a local directory of images, or ``None``.
+        include_images_stats: Whether to compute image count/size stats.
 
     Returns:
-        A dictionary of structural metrics keyed by metric name, including
-        the document UUID.
+        The computed :class:`StructuralMetrics`.
 
     Raises:
-        ValueError: If *uuid* does not match the UUID v4 format.
-        FileNotFoundError: If no Markdown file exists for the given UUID.
+        FileNotFoundError: If *md_path* does not exist.
     """
-    if not _UUID_V4_PATTERN.fullmatch(uuid):
-        raise ValueError(f"Invalid UUID format : {uuid!r}")
-    
-    md_path = WhitepaperConfig.MD_DIR / f"{uuid}.md"
-    img_dir = WhitepaperConfig.IMG_DIR / uuid
-
     if not md_path.exists():
-        raise FileNotFoundError(f"Markdown file not found for UUID: {uuid}")
+        raise FileNotFoundError(f"Markdown file not found for UUID: {doc_uuid}")
 
     md_content = md_path.read_text(encoding="utf-8")
     clean_text = _clean_text_for_nlp(md_content)
@@ -89,34 +111,73 @@ def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> 
             syllable_count = textstat.syllable_count(clean_text)                     # type: ignore[assignment]
             gunning_fog = textstat.gunning_fog(clean_text)                           # type: ignore[assignment]
             flesch_reading_ease = textstat.flesch_reading_ease(clean_text)           # type: ignore[assignment]
-        except Exception as e: # noqa: BLE001
-            logger.warning("textstat failed for UUID %s: %s", uuid, e)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("textstat failed for UUID %s: %s", doc_uuid, e)
 
     avg_word_len = (
         round(sum(len(w) for w in words) / word_count, 2) if word_count > 0 else 0.0
-    )   
+    )
 
-    img_stats: dict = {} 
+    img_stats: dict = {}
     if include_images_stats:
-        if img_dir.exists():
+        if img_dir is not None and img_dir.exists():
             img_files = [f for f in img_dir.iterdir() if f.is_file()]
             img_stats = {
                 "image_count": len(img_files),
                 "images_total_size_bytes": sum(f.stat().st_size for f in img_files),
             }
         else:
-            img_stats = {
-                "image_count": None,
-                "images_total_size_bytes": None,
-            }
-    return {
-        "uuid": uuid,
-        "text_size_bytes": text_size_bytes,
-        "word_count": word_count,
-        "sentence_count": sentence_count,
-        "syllable_count": syllable_count,
-        "avg_word_length": avg_word_len,
-        "gunning_fog_index": round(gunning_fog, 2) if gunning_fog > 0 else None,
-        "flesch_reading_ease": round(flesch_reading_ease, 2) if flesch_reading_ease > 0 else None,
+            img_stats = {"image_count": None, "images_total_size_bytes": None}
+
+    return StructuralMetrics(
+        uuid=doc_uuid,
+        text_size_bytes=text_size_bytes,
+        word_count=word_count,
+        sentence_count=sentence_count,
+        syllable_count=syllable_count,
+        avg_word_length=avg_word_len,
+        gunning_fog_index=round(gunning_fog, 2) if gunning_fog > 0 else None,
+        flesch_reading_ease=round(flesch_reading_ease, 2) if flesch_reading_ease > 0 else None,
         **img_stats,
-    }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public entry point — downloads from MinIO, then computes
+# ---------------------------------------------------------------------------
+
+def compute_structural_metrics(uuid: str, include_images_stats: bool = True) -> StructuralMetrics:
+    """Download a document's staged files from MinIO and compute structural metrics.
+
+    Args:
+        uuid: UUID v4 identifier of the document to analyse.
+        include_images_stats: When ``True``, image count and total size are
+            included in the returned metrics; ``None`` values are used when
+            no images are found.
+
+    Returns:
+        The computed :class:`StructuralMetrics`, tagged with *uuid*.
+
+    Raises:
+        ValueError: If *uuid* does not match the UUID v4 format.
+        FileNotFoundError: If no Markdown file exists in the temp bucket for the given UUID.
+    """
+    if not _UUID_V4_PATTERN.fullmatch(uuid):
+        raise ValueError(f"Invalid UUID format : {uuid!r}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        md_path = temp_dir_path / f"{uuid}.md"
+        img_dir = temp_dir_path / "images"
+
+        download_markdown_from_temp(uuid, md_path)
+
+        if include_images_stats:
+            download_images_from_temp(uuid, img_dir)
+
+        return _compute_metrics_from_files(
+            doc_uuid=uuid,
+            md_path=md_path,
+            img_dir=img_dir if include_images_stats else None,
+            include_images_stats=include_images_stats,
+        )

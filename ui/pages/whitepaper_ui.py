@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
+
+import emoji
 import requests
 import streamlit as st
 
 from core_shared.config import API_URL
-
 
 API_WHITEPAPER_URL = f"{API_URL}/whitepaper"
 http: requests.Session = st.session_state["http_session"]
@@ -55,6 +57,56 @@ with st.sidebar:
             "No document in session.<br>Upload a PDF to begin.</span>",
             unsafe_allow_html=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Resume an existing document
+# ---------------------------------------------------------------------------
+
+try:
+    available = http.post(f"{API_WHITEPAPER_URL}/resume").json().get("available_uuids", [])
+except requests.exceptions.ConnectionError:
+    available = []
+    st.error("FastAPI server unreachable.")
+
+col_pick, col_go = st.columns([3, 1])
+with col_pick:
+    selected_uuid = st.selectbox(
+        "Resume an existing document",
+        options=available,
+        index=None,
+        placeholder="Pick a staged UUID…" if available else "No staged documents in MinIO",
+        disabled=not available,
+    )
+with col_go:
+    st.write("")
+    st.write("")
+    resume_clicked = st.button(
+        "Resume",
+        disabled=not selected_uuid,
+        use_container_width=True,
+    )
+
+if resume_clicked and selected_uuid:
+    with st.spinner("Restoring session…"):
+        try:
+            response = http.post(
+                f"{API_WHITEPAPER_URL}/resume",
+                params={"uuid": selected_uuid},
+            )
+            if response.status_code == 200:
+                for key in ("markdown_content", "metrics", "toc", "analyses"):
+                    st.session_state.pop(key, None)
+                st.session_state["doc_uuid"] = selected_uuid
+                st.session_state["current_project"] = f"resumed:{selected_uuid[:8]}"
+                st.success(f"Session bound to {selected_uuid[:8]}…")
+                st.rerun()
+            else:
+                st.error(f"Server error {response.status_code} — {response.text}")
+        except requests.exceptions.ConnectionError:
+            st.error("FastAPI server unreachable.")
+
+st.divider()
 
 
 # ---------------------------------------------------------------------------
@@ -242,10 +294,10 @@ if "analyses" in st.session_state:
         for section_title, analysis in analyses.items():
             sentiment = analysis.get("sentiment", "neutral")
             icon = {
-                "positive": ":large_green_circle:",
-                "negative": ":red_circle:",
-                "neutral": ":white_circle:"
-            }.get(sentiment, ":grey_question:")
+                "positive": emoji.emojize(":green_circle:"),
+                "negative": emoji.emojize(":red_circle:"),
+                "neutral": emoji.emojize(":white_circle:")
+            }.get(sentiment, emoji.emojize(":grey_question:"))
 
             with st.expander(f"{icon}  {section_title}", expanded=False):
                 c1, c2 = st.columns([1, 2])

@@ -1,12 +1,20 @@
-import re
-import shutil
-from pathlib import Path
+#!/usr/bin/env python3
+
 import logging
+import re
+import tempfile
+import uuid
+from pathlib import Path
 
 import ollama
 import pymupdf4llm
 
 from core_shared.config import WhitepaperConfig
+from db.object_store.whitepaper import (
+    upload_images_to_temp,
+    upload_markdown_to_temp,
+    upload_pdf_to_temp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,61 +113,64 @@ def pdf_to_semantic_markdown(
     """
     if extract_images:
         Path(img_dir).mkdir(parents=True, exist_ok=True)
-    
-    md_text= pymupdf4llm.to_markdown( # type: ignore[assignment]
+
+    md_text = pymupdf4llm.to_markdown(  # type: ignore[assignment]
         pdf_path,
         write_images=extract_images,
         image_path=img_dir if extract_images else None,
         image_format="png",
         force_text=False
     )
-    
+
     if extract_images:
         img_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
-        final_md_text: str = img_pattern.sub(_replace_image_with_description, md_text) # type: ignore[arg-type]
+        final_md_text: str = img_pattern.sub(_replace_image_with_description, md_text)  # type: ignore[arg-type]
     else:
-        final_md_text = md_text # type: ignore[assignment]
+        final_md_text = md_text  # type: ignore[assignment]
     Path(output_md).write_text(final_md_text, encoding="utf-8")
-    return final_md_text #type:ignore[return-value]
+    return final_md_text  # type:ignore[return-value]
 
-def save_pipeline_outputs(
-        md_content: str,
-        final_md_path: str,
-        temp_img_dir: str,
-        final_img_dir: str,
-) -> bool:
-    """Persist Markdown content and move the temporary image directory to permanent storage.
+
+# ---------------------------------------------------------------------------
+# Staging (MinIO temp_bucket) — replaces local-disk persistence
+# ---------------------------------------------------------------------------
+
+def stage_document(file_content: bytes, filename: str, extract_images: bool) -> tuple[str, str]:
+    """Process an uploaded PDF and stage its outputs (PDF, markdown, images) in MinIO.
+
+    Runs the full extraction pipeline inside a temporary directory and uploads
+    each artifact directly to the ``temp_bucket`` in MinIO — nothing is kept
+    on local disk once this function returns.
 
     Args:
-        md_content: Markdown string to write to disk.
-        final_md_path: Destination path for the Markdown file.
-        temp_img_dir: Path to the temporary image directory produced during extraction.
-        final_img_dir: Target path in the datalake where images should be stored permanently.
+        file_content: Raw bytes of the uploaded PDF.
+        filename: Original filename, used to build a safe temp filename.
+        extract_images: Whether to extract embedded images.
 
     Returns:
-        ``True`` on success, ``False`` if any I/O error occurs.
+        A tuple of ``(generated_uuid, markdown_content)``.
     """
-    try:
-        md_path = Path(final_md_path)
-        md_path.parent.mkdir(parents=True, exist_ok=True)
-        md_path.write_text(md_content, encoding="utf-8")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        safe_filename = re.sub(r"[^\w\-.]", "_", filename)
+        pdf_path = temp_dir_path / safe_filename
+        output_md = temp_dir_path / "output.md"
+        img_dir = temp_dir_path / "images_tmp"
 
-        source_imgs = Path(temp_img_dir)
-        target_imgs = Path(final_img_dir)
+        pdf_path.write_bytes(file_content)
 
-        if (
-            source_imgs.exists()
-            and source_imgs.is_dir()
-            and any(source_imgs.iterdir())
-            ):
+        markdown_content = pdf_to_semantic_markdown(
+            pdf_path=str(pdf_path),
+            output_md=str(output_md),
+            img_dir=str(img_dir),
+            extract_images=extract_images,
+        )
 
-            if target_imgs.exists():
-                shutil.rmtree(target_imgs)
-            target_imgs.parent.mkdir(parents=True, exist_ok=True)
+        generated_uuid = str(uuid.uuid4())
 
-            shutil.copytree(source_imgs, target_imgs)
+        upload_pdf_to_temp(generated_uuid, pdf_path)
+        upload_markdown_to_temp(generated_uuid, output_md)
+        uploaded_img_count = upload_images_to_temp(generated_uuid, img_dir)
+        logger.info("Uploaded %d image(s) to temp_bucket for %s", uploaded_img_count, generated_uuid)
 
-        return True
-    except Exception as e:
-        logger.error("Error while saving pipeline outputs: %s", e)
-        return False
+        return generated_uuid, markdown_content

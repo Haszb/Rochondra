@@ -20,8 +20,7 @@ class StructuralAnalysisResponse(BaseModel):
 
     status: str
     uuid: str
-    metrics: dict
-    saved_to_registry: bool = True
+    metrics: dict[str, Optional[float | int | str]]
 
 class TocExtractionResponse(BaseModel):
     """Response schema for the table of contents extraction endpoint."""
@@ -45,5 +44,24 @@ class SentimentAnalysisResponse(BaseModel):
     status: str
     uuid: str
     analyses: dict[str, SectionAnalysisItem]
-    saved_to_registry: bool = False
-# ************************************************************************    
+# ************************************************************************
+
+
+class ResumeSessionResponse(BaseModel):
+    """Response schema for the resume-session endpoint.
+
+    Always returns ``available_uuids`` so callers can display or refresh a
+    picker; ``uuid`` is only set when a resume actually happened.
+    """
+
+    status: str
+    uuid: Optional[str] = None
+    available_uuids: list[str]
+
+
+class FinalizeResponse(BaseModel):
+    """Response schema for the finalize endpoint."""
+
+    status: str
+    uuid: str
+    persisted: list[str]

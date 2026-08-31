@@ -1,17 +1,28 @@
+#!/usr/bin/env python3
+
 import atexit
 import difflib
-import json
 import logging
 import re
+import tempfile
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional, cast
-import unicodedata
+from typing import Any, cast
 
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline  # type: ignore[import]
+from minio.error import S3Error
+from transformers import (  # type: ignore[import]
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    pipeline,
+)
 
-from core_shared.config import WhitepaperConfig
-
+from db.object_store.whitepaper import (
+    download_markdown_from_temp,
+    get_json_from_temp,
+    json_exists_in_temp,
+    upload_json_to_temp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +94,6 @@ class SectionAnalyzer:
 
     def __init__(
         self,
-        output_dir: Optional[str] = None,
         sentiment_pipeline=None,  # type: ignore[assignment]
         summarizer_tokenizer=None,  # type: ignore[assignment]
         summarizer_model=None,  # type: ignore[assignment]
@@ -100,46 +110,22 @@ class SectionAnalyzer:
         self.min_summary_words = min_summary_words
         self.match_threshold = match_threshold
 
-        self.output_dir = Path(output_dir) if output_dir else None
-        if self.output_dir:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
 
     def _already_processed(self, uuid: str) -> bool:
-        """Return ``True`` if a JSON analysis file already exists for the given UUID."""
-        if not self.output_dir:
-            return False
-        return (self.output_dir / f"{uuid}_analysis.json").exists()
+        """Return ``True`` if an analysis result already exists in the object store."""
+        return json_exists_in_temp(uuid, "analysis")
 
     def _save(self, uuid: str, results: dict[str, SectionAnalysis]) -> None:
-        """Persist analysis results to a JSON file."""
-        if not self.output_dir:
-            return
-        path = self.output_dir / f"{uuid}_analysis.json"
+        """Persist analysis results as JSON in the object store."""
         payload = {title: asdict(analysis) for title, analysis in results.items()}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        upload_json_to_temp(uuid, "analysis", payload)
 
     def _load(self, uuid: str) -> dict[str, SectionAnalysis]:
-        """Load previously persisted analysis results from the JSON file.
-
-        Args:
-            uuid: UUID of the document to load.
-
-        Returns:
-            A dictionary mapping section titles to :class:`SectionAnalysis` objects.
-
-        Raises:
-            ValueError: If no output directory is configured.
-        """
-        if not self.output_dir:
-            raise ValueError("output_dir is not set.")
-        path = self.output_dir / f"{uuid}_analysis.json"
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+        """Load previously persisted analysis results from the object store."""
+        data = get_json_from_temp(uuid, "analysis")
         return {title: SectionAnalysis(**values) for title, values in data.items()}
 
     # ------------------------------------------------------------------
@@ -313,18 +299,20 @@ class SectionAnalyzer:
             logger.info("Skipping already processed document: %s", uuid)
             return self._load(uuid)
 
-        toc_path = WhitepaperConfig.TOCS_DIR / f"{uuid}.json"
-        md_path = WhitepaperConfig.MD_DIR / f"{uuid}.md"
-
-        if not toc_path.exists():
+        if not json_exists_in_temp(uuid, "toc"):
             raise FileNotFoundError(f"TOC not found for UUID: {uuid}")
-        if not md_path.exists():
-            raise FileNotFoundError(f"Markdown file not found for UUID: {uuid}")
 
-        with open(toc_path, encoding="utf-8") as f:
-            toc_data = json.load(f)
+        toc_data = get_json_from_temp(uuid, "toc")
 
-        md_lines = md_path.read_text(encoding="utf-8").splitlines()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            md_path = Path(temp_dir) / f"{uuid}.md"
+            try:
+                download_markdown_from_temp(uuid, md_path)
+            except S3Error:
+                raise FileNotFoundError(f"Markdown file not found for UUID: {uuid}")
+
+            md_lines = md_path.read_text(encoding="utf-8").splitlines()
+
         anchors = self._find_anchors(toc_data, md_lines)
 
         if not anchors:

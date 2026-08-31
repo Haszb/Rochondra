@@ -13,6 +13,7 @@ wheels/
 storage/
 data/
 storage/index_registry.csv
+test.ipynb
 
 # Environment & secrets
 .env
