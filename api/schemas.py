@@ -60,8 +60,14 @@ class ResumeSessionResponse(BaseModel):
 
 
 class FinalizeResponse(BaseModel):
-    """Response schema for the finalize endpoint."""
+    """Response schema for the finalize endpoint.
+
+    ``action`` reports which branch ran (``saved`` or ``deleted``); the matching
+    list holds the paths that were affected.
+    """
 
     status: str
     uuid: str
-    persisted: list[str]
+    action: str
+    persisted: list[str] = []
+    deleted: list[str] = []

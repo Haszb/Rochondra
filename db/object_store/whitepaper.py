@@ -140,6 +140,20 @@ def upload_json_to_documents(uuid: str, kind: str, payload) -> None:
     client.put_object(DOCUMENTS_BUCKET, f"{kind}/{uuid}.json", io.BytesIO(data), length=len(data))
 
 
+def _temp_keys_for_uuid(uuid: str) -> list[str]:
+    """Return every temp-bucket key owned by *uuid* (fixed slots + image files)."""
+    keys = [
+        f"pdf/{uuid}.pdf",
+        f"markdown/{uuid}.md",
+        f"toc/{uuid}.json",
+        f"analysis/{uuid}.json",
+    ]
+    for obj in client.list_objects(TEMP_BUCKET, prefix=f"images/{uuid}/", recursive=True):
+        if obj.object_name is not None:
+            keys.append(obj.object_name)
+    return keys
+
+
 def move_artifacts_from_temp_to_documents(uuid: str) -> list[str]:
     """Move every artifact belonging to *uuid* from temp-bucket to documents-bucket.
 
@@ -152,18 +166,8 @@ def move_artifacts_from_temp_to_documents(uuid: str) -> list[str]:
     """
     ensure_bucket(DOCUMENTS_BUCKET)
 
-    keys: list[str] = [
-        f"pdf/{uuid}.pdf",
-        f"markdown/{uuid}.md",
-        f"toc/{uuid}.json",
-        f"analysis/{uuid}.json",
-    ]
-    for obj in client.list_objects(TEMP_BUCKET, prefix=f"images/{uuid}/", recursive=True):
-        if obj.object_name is not None:
-            keys.append(obj.object_name)
-
     moved: list[str] = []
-    for key in keys:
+    for key in _temp_keys_for_uuid(uuid):
         try:
             client.copy_object(
                 DOCUMENTS_BUCKET,
@@ -178,3 +182,26 @@ def move_artifacts_from_temp_to_documents(uuid: str) -> list[str]:
         moved.append(f"{DOCUMENTS_BUCKET}/{key}")
 
     return moved
+
+
+def delete_artifacts_from_temp(uuid: str) -> list[str]:
+    """Remove every temp-bucket artifact belonging to *uuid*.
+
+    Missing objects are silently skipped, so this is safe to call even when
+    a document only went through a subset of the pipeline.
+
+    Returns:
+        The list of ``bucket/key`` paths that were deleted.
+    """
+    deleted: list[str] = []
+    for key in _temp_keys_for_uuid(uuid):
+        try:
+            client.stat_object(TEMP_BUCKET, key)
+        except S3Error as e:
+            if e.code == "NoSuchKey":
+                continue
+            raise
+        client.remove_object(TEMP_BUCKET, key)
+        deleted.append(f"{TEMP_BUCKET}/{key}")
+
+    return deleted

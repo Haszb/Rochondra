@@ -21,6 +21,7 @@ from api.schemas import (
 from core_shared.config import WhitepaperConfig
 from db.cache.client import cache_delete, cache_get, cache_set
 from db.object_store.whitepaper import (
+    delete_artifacts_from_temp,
     download_pdf_from_temp,
     list_pdf_uuids_in_temp,
     move_artifacts_from_temp_to_documents,
@@ -288,11 +289,18 @@ async def finalize_document(
     request: Request,
     uuid: str | None = None,
 ) -> FinalizeResponse:
-    """Persist a document's ephemeral state to durable storage.
+    """Close a document's session: either save it durably or delete it.
 
-    Prefers the session's ``current_uuid`` when one is set (typical during an
-    interactive workflow); otherwise requires a ``uuid`` query parameter
-    (typical for batch/cron calls without a session).
+    The ``marked_for_deletion`` flag captured at ``/extract`` time (from the
+    ``save_markdown`` toggle) decides the branch:
+
+    * **SAVE**  — upsert Postgres rows and move MinIO artifacts to
+      documents-bucket.
+    * **DELETE** — drop MinIO artifacts from temp-bucket, no Postgres write.
+
+    Both branches drop the four uuid-scoped Redis keys and clear the session
+    if the UUID matches. Prefers the session's ``current_uuid`` when set;
+    otherwise a ``uuid`` query parameter is required.
     """
     session_uuid = request.session.get("current_uuid")
     uuid = session_uuid or uuid
@@ -300,13 +308,6 @@ async def finalize_document(
         raise HTTPException(
             status_code=400,
             detail="No UUID provided and no document in session.",
-        )
-
-    structural_raw = await asyncio.to_thread(cache_get, f"structural_analysis:{uuid}")
-    if structural_raw is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No cached structural analysis found for UUID: {uuid}",
         )
 
     metadata_raw = await asyncio.to_thread(cache_get, _METADATA_KEY.format(uuid=uuid))
@@ -317,8 +318,46 @@ async def finalize_document(
         )
 
     try:
-        metrics = json.loads(structural_raw).get("metrics", {})
         metadata = json.loads(metadata_raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Corrupted metadata payload.")
+
+    redis_keys = (
+        _METADATA_KEY.format(uuid=uuid),
+        f"structural_analysis:{uuid}",
+        f"toc_extraction:{uuid}",
+        f"sentiment_analysis:{uuid}",
+    )
+
+    if metadata.get("marked_for_deletion"):
+        try:
+            deleted = await asyncio.to_thread(delete_artifacts_from_temp, uuid)
+        except Exception as e:
+            logger.exception("Failed to delete MinIO artifacts for %s", uuid)
+            raise HTTPException(status_code=500, detail=f"MinIO delete failed: {e}")
+
+        await asyncio.to_thread(cache_delete, *redis_keys)
+
+        if request.session.get("current_uuid") == uuid:
+            request.session.pop("current_uuid", None)
+            request.session.pop("current_project", None)
+
+        return FinalizeResponse(
+            status="success",
+            uuid=uuid,
+            action="deleted",
+            deleted=[*deleted, *(f"redis:{k}" for k in redis_keys)],
+        )
+
+    structural_raw = await asyncio.to_thread(cache_get, f"structural_analysis:{uuid}")
+    if structural_raw is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No cached structural analysis found for UUID: {uuid}",
+        )
+
+    try:
+        metrics = json.loads(structural_raw).get("metrics", {})
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="Corrupted cache payload.")
 
@@ -334,13 +373,7 @@ async def finalize_document(
         logger.exception("Failed to move MinIO artifacts for %s", uuid)
         raise HTTPException(status_code=500, detail=f"MinIO move failed: {e}")
 
-    await asyncio.to_thread(
-        cache_delete,
-        _METADATA_KEY.format(uuid=uuid),
-        f"structural_analysis:{uuid}",
-        f"toc_extraction:{uuid}",
-        f"sentiment_analysis:{uuid}",
-    )
+    await asyncio.to_thread(cache_delete, *redis_keys)
 
     if request.session.get("current_uuid") == uuid:
         request.session.pop("current_uuid", None)
@@ -349,5 +382,6 @@ async def finalize_document(
     return FinalizeResponse(
         status="success",
         uuid=uuid,
+        action="saved",
         persisted=["postgres:whitepaper", "postgres:fact_structural", *moved],
     )
