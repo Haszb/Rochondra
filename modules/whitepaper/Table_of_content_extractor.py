@@ -8,10 +8,10 @@ from pathlib import Path
 from statistics import mode
 from typing import Optional
 
-import ollama
 import pymupdf
 
 from core_shared.config import WhitepaperConfig
+from core_shared.llm import client as ollama_client
 from db.object_store.whitepaper import (
     get_json_from_temp,
     json_exists_in_temp,
@@ -461,7 +461,7 @@ class WhitepaperExtractor:
         - Use relative size to infer hierarchy when numbering is absent
         """
         try:
-            response = ollama.chat(
+            response = ollama_client.chat(
                 model=self.llm_model,
                 messages=[
                     {"role": "system", "content": system_prompt},

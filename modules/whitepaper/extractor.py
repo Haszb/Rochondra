@@ -6,10 +6,10 @@ import tempfile
 import uuid
 from pathlib import Path
 
-import ollama
 import pymupdf4llm
 
 from core_shared.config import WhitepaperConfig
+from core_shared.llm import client as ollama_client
 from db.object_store.whitepaper import (
     upload_images_to_temp,
     upload_markdown_to_temp,
@@ -54,7 +54,7 @@ def describe_image_with_ollama(image_path: str) -> str:
       neural networks, with specific algorithms listed in each intersection.
       """
     # Requires a vision-capable model, e.g. 'llava' or 'llama3.2-vision'.
-    response = ollama.chat(
+    response = ollama_client.chat(
         model=WhitepaperConfig.LLM_MODEL_VISION,
         messages=[
         {
