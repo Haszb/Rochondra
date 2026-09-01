@@ -38,11 +38,18 @@ temp_bucket      = "temp-bucket"
 documents_bucket = "documents-bucket"
 
 [ollama]
-port = 11434
+# Which of these two endpoints a call uses is decided by the model name, not
+# here: a model whose name contains "cloud" goes to `cloud_url` with the API
+# key from .env, anything else to the local daemon on `port`. So switching a
+# model between local and cloud is a one-line edit under [whitepaper].
+port      = 11434
+cloud_url = "https://ollama.com"
 
 [whitepaper]
-model            = "gemma4:31b-cloud"
-vision_model     = "gemma4:31b-cloud"
+# Contains "cloud" -> Ollama's cloud (needs OLLAMA_API_KEY); otherwise the
+# local daemon, which must have the model pulled.
+model            = "gemma4:31b-cloud" # "qwen3.5:latest"
+vision_model     = "gemma4:31b-cloud" # "qwen3.5:latest"
 sentiment_model  = "ProsusAI/finbert"
 summarizer_model = "sshleifer/distilbart-cnn-12-6"
 max_upload_mb    = 50

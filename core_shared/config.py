@@ -147,13 +147,34 @@ class MinioConfig:
 
 
 class OllamaConfig:
-    """Ollama connection settings."""
+    """Ollama connection settings for both of the endpoints it can serve.
+
+    The local daemon follows ``main_url`` like every other service. Ollama's
+    hosted models live somewhere else entirely — a different scheme on a
+    different port — and are reached with an API key. Which endpoint a call
+    uses is decided per model by :meth:`is_cloud_model`, so no setting has to
+    move when a model is swapped for one from the other world.
+    """
 
     HOST = _host_for("ollama")
     PORT = int(_ollama["port"])
     URL = _url_for(PORT, HOST)
 
+    #: Full URL rather than another host entry, since both the scheme and the
+    #: port differ from the local daemon.
+    CLOUD_URL = _ollama["cloud_url"].rstrip("/")
+
     API_KEY = os.getenv("OLLAMA_API_KEY") or None
+
+    @staticmethod
+    def is_cloud_model(model: str) -> bool:
+        """Return ``True`` when *model* names one of Ollama's hosted models.
+
+        Matches the bare substring ``cloud`` rather than a ``-cloud`` suffix,
+        because Ollama spells the tag both ways — ``gemma4:31b-cloud`` and
+        ``gemma4:31b:cloud`` are the same kind of model.
+        """
+        return "cloud" in model.lower()
 
 
 # ---------------------------------------------------------------------------
