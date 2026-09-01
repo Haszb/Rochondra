@@ -43,9 +43,12 @@ _MAX_FILE_SIZE = WhitepaperConfig.MAX_UPLOAD_BYTES
 
 # ---------------------------------------------------------------------------
 # Registry helpers
-# Metadata for a staged document lives in Redis under ``metadata:{uuid}``
-# (no TTL) between /extract and /finalize; /finalize copies it into Postgres
-# and drops the Redis key.
+# Everything a staged document accumulates lives in Redis under ``metadata:``,
+# ``structural_analysis:``, ``toc_extraction:`` and ``sentiment_analysis:``,
+# all keyed by uuid and all written without a TTL. /finalize is what deletes
+# them, once it has copied what it needs into Postgres — expiring them on a
+# timer instead would break the save branch, which reads the structural key
+# back. Abandoned documents are left to a future cleanup job.
 # ---------------------------------------------------------------------------
 
 _METADATA_KEY = "metadata:{uuid}"
@@ -168,7 +171,7 @@ async def analyze_document_structure(
         )
 
         await asyncio.to_thread(
-            cache_set, f"structural_analysis:{doc_uuid}", response.model_dump_json()
+            cache_set, f"structural_analysis:{doc_uuid}", response.model_dump_json(), None
         )
 
         return response
@@ -209,7 +212,9 @@ async def extract_toc(request: Request) -> TocExtractionResponse:
             toc_content=toc_data,
         )
 
-        await asyncio.to_thread(cache_set, f"toc_extraction:{doc_uuid}", response.model_dump_json())
+        await asyncio.to_thread(
+            cache_set, f"toc_extraction:{doc_uuid}", response.model_dump_json(), None
+        )
 
         return response
 
@@ -243,7 +248,7 @@ async def analyze_sentiment(request: Request) -> SentimentAnalysisResponse:
         )
 
         await asyncio.to_thread(
-            cache_set, f"sentiment_analysis:{doc_uuid}", response.model_dump_json()
+            cache_set, f"sentiment_analysis:{doc_uuid}", response.model_dump_json(), None
         )
 
         return response
