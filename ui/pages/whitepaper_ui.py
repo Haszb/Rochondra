@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import emoji
 import requests
 import streamlit as st

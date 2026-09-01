@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from datetime import UTC, datetime
 
 from sqlalchemy import BigInteger, Column, DateTime, Float, ForeignKey, Integer, String
