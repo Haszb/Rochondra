@@ -12,7 +12,7 @@
 | UI | Streamlit |
 | PDF extraction | PyMuPDF / pymupdf4llm |
 | NLP | FinBERT (sentiment) · DistilBART (summarization) |
-| LLM arbitration | Ollama (Gemma) |
+| LLM (TOC arbitration, image description) | Ollama, local daemon or hosted |
 | Object storage | MinIO (`temp-bucket`, `documents-bucket`) |
 | Cache / staging metadata | Redis |
 | Durable storage | PostgreSQL (SQLAlchemy 2 + psycopg 3) |
@@ -25,13 +25,25 @@
 
 **Docker** — Postgres, Redis and MinIO run as containers, defined in `docker-compose.yml`.
 
-**Ollama** must be running and reachable at its default address (`http://localhost:11434`), with the configured model available. It is used for table-of-contents arbitration and for describing extracted images:
+**Ollama** serves the pipeline's two LLM jobs — table-of-contents arbitration
+and image description. Which endpoint a call reaches is decided by the *model
+name*, so moving a job between local and hosted is a one-line edit in
+`config.toml`:
+
+| Model name | Endpoint | Requires |
+|---|---|---|
+| contains `cloud` — e.g. `gemma4:31b-cloud` | `https://ollama.com` | `OLLAMA_API_KEY` in `.env` |
+| anything else — e.g. `qwen3.5:latest` | the local daemon, `{main_url}:11434` | the daemon running, model pulled |
 
 ```bash
-ollama pull "your_model"   # default: gemma4:31b-cloud
+ollama pull "your_model"   # local models only
 ```
 
-Cloud-hosted models (`*-cloud`) require being logged in to Ollama.
+The two worlds do not overlap: a CLI login does not authenticate a call made to
+`ollama.com`, and an API key is useless against the local daemon, which signs in
+with its own credentials and answers 401 to a bearer token. `[whitepaper].model`
+and `[whitepaper].vision_model` choose which world each job uses, and the two
+may differ.
 
 ---
 
@@ -108,7 +120,7 @@ main_url = "http://localhost"   # scheme + host, no port
 | `PostgresConfig.URL` | `{driver}://{user}:{password}@{host}:{postgres.port}/{database}` |
 | `RedisConfig.URL` | `redis://{host}:{redis.port}/{redis.db}` |
 | `MinioConfig.ENDPOINT` | `{host}:{minio.port}` |
-| `OllamaConfig.URL` | `{main_url}:{ollama.port}` |
+| `OllamaConfig.URL` | `{main_url}:{ollama.port}` — the local daemon; hosted models use `[ollama].cloud_url` instead |
 
 When one service does not live with the others — a managed database, say — set
 the matching `POSTGRES_HOST`, `REDIS_HOST`, `MINIO_HOST` or `OLLAMA_HOST` in
@@ -118,8 +130,9 @@ the matching `POSTGRES_HOST`, `REDIS_HOST`, `MINIO_HOST` or `OLLAMA_HOST` in
 
 Sections: `[global]`, `[api]`, `[ui]`, `[postgres]`, `[redis]`, `[minio]`,
 `[ollama]`, `[whitepaper]`. Beyond hosts and ports this covers the bucket names,
-the Redis default TTL, SQL echo logging, the upload size cap, and the model ids
-for Ollama, FinBERT and DistilBART.
+the Redis default TTL, SQL echo logging, the upload size cap, Ollama's cloud
+URL, and the model ids for the Ollama chat and vision jobs, FinBERT and
+DistilBART.
 
 ### .env
 
@@ -129,6 +142,8 @@ POSTGRES_PASSWORD=      MINIO_SECRET_KEY=       REDIS_PASSWORD=
                                                 OLLAMA_API_KEY=
 ```
 
+`OLLAMA_API_KEY` is needed only once a model whose name contains `cloud` is
+configured; purely local setups can leave it empty.
 `docker-compose.yml` substitutes the Postgres and MinIO credentials from this
 same file, so they are defined once. A real environment variable always wins
 over the file, which is what you want when a deployment platform injects them.
@@ -151,8 +166,11 @@ PDF upload
 
 Each stage is a `POST` under `/api/whitepaper`. A document is identified by a
 UUID minted at extraction time and held in the session, so later stages take no
-identifier. Intermediate results are staged in `temp-bucket` and cached in
-Redis, which makes re-running any stage on the same document instantaneous.
+identifier. Intermediate results are staged in `temp-bucket` and mirrored into
+Redis. The TOC and semantic stages return their stored JSON rather than
+recomputing when `toc/{uuid}.json` or `analysis/{uuid}.json` already exists, so
+re-running them on the same document is instantaneous — delete that object to
+force a fresh run. Structural metrics are always recomputed.
 
 Two endpoints manage a document's lifecycle:
 
@@ -163,9 +181,12 @@ Two endpoints manage a document's lifecycle:
   artifacts to `documents-bucket`; **delete** discards the staged artifacts.
   Both clear the document's Redis keys and the session.
 
-Until a document is finalized, its artifacts and its `metadata:{uuid}` Redis key
-(which has no TTL) stay in place — there is currently no garbage collection for
-abandoned documents.
+Until a document is finalized, its artifacts and all four of its uuid-scoped
+Redis keys stay in place. Those keys are written without a TTL deliberately:
+`/finalize`'s save branch reads the structural metrics back out of Redis, so an
+expiry would make any document finalized more than an hour after its analysis —
+or resumed from an earlier day — fail. Reclaiming what abandoned documents leave
+behind is left to a future scheduled job; there is no garbage collection today.
 
 ---
 
@@ -180,7 +201,7 @@ rochondra/
 │   └── schemas.py
 ├── core_shared/
 │   ├── config.py               config.toml + .env -> all URLs and settings
-│   └── llm.py                  shared Ollama client
+│   └── llm.py                  Ollama client, routed per model name
 ├── db/
 │   ├── cache/client.py         Redis helpers
 │   ├── object_store/           MinIO client + per-domain helpers
@@ -213,7 +234,9 @@ rochondra/
 ## Notes
 
 - The first API start is slow: FinBERT and DistilBART are loaded at import time
-  (~1.5 GB), downloaded once and then cached under `~/.cache/huggingface`.
+  (~1.5 GB), downloaded once and then cached under `~/.cache/huggingface`. Under
+  `--reload` the cost is paid twice, by the reloader parent and by the server
+  child, and it is paid even for the stages that never touch the models.
 - Only structural metrics reach Postgres today. TOC and sentiment results are
   stored as JSON in the object store; `fact_sentiment`, `fact_ner` and
   `fact_reference` are placeholder tables whose columns are still to be defined.
