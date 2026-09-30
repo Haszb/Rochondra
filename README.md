@@ -15,9 +15,10 @@ common format can still be compared side by side.
 
 Concretely it is a pipeline you run yourself: give it a PDF, get back Markdown,
 readability metrics, a reconstructed table of contents, and the tone and summary
-of every section. It covers the Documentation pillar of a wider project scoring
-system built on team, code, tokenomics and community, and it is still under
-active construction.
+of every section. It covers the Documentation pillar of a five-pillar evaluation
+framework (team, technology and code, tokenomics, documentation, community). It
+outputs raw measurements and a document's position within the corpus, never a
+score or a rating, and it is still under active construction.
 
 ```
 PDF upload
@@ -42,6 +43,18 @@ State is split across MinIO (artifacts), Redis (staging) and PostgreSQL
 | Staging state | Redis |
 | Durable storage | PostgreSQL (SQLAlchemy 2 + psycopg 3) |
 | Packaging | uv, Python 3.12 |
+
+## Project documents
+
+This README covers how to run the code. Why the project is shaped this way is
+written up separately:
+
+- **[Project brief](docs/project-brief.md)**: the problem, the approach, the
+  scope, the planned outputs and the questions still open.
+- **[Decision log](docs/decision-log.md)**: the decisions that shaped the
+  project, each with the alternatives ruled out and the cost accepted. Where the
+  code does not yet follow a decision, the entry says so.
+- **Roadmap**: to follow.
 
 ## Quickstart
 
@@ -217,6 +230,7 @@ db/             cache/ Redis · object_store/ MinIO + key layouts · sql/ models
 modules/        the analysis itself: extraction, structure, TOC, sentiment
 ui/             Streamlit app and its pages
 scripts/dev.sh  containers + API in one command
+docs/           project brief and decision log
 ```
 
 Both `db/` and `modules/` are organised by domain. Only `whitepaper` is
@@ -250,8 +264,13 @@ reasoning is public in the logbook:
 [what to expect next](https://medium.com/@rochondra.lab/quick-presentation-of-what-to-expect-next-ce1027b7ad33),
 [decoding whitepapers](https://medium.com/@rochondra.lab/decoding-whitepapers-what-academic-research-reveals-about-crypto-project-quality-4e7c8f842570),
 and [the role of analysts](https://medium.com/@rochondra.lab/information-asymmetry-and-conflicts-of-interest-the-ambiguous-role-of-analysts-in-the-ico-c969af990ab7).
+The decisions taken since then, starting with this one, are recorded in the
+[decision log](docs/decision-log.md).
 
 ## Current limitations
+
+Points where the code lags a recorded decision are flagged as *Current gap* in
+the [decision log](docs/decision-log.md). The practical ones:
 
 - **Startup is slow.** FinBERT and DistilBART are instantiated at import time,
   about 1.5 GB, downloaded once and then cached under `~/.cache/huggingface`.
