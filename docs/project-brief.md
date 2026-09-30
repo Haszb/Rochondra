@@ -44,7 +44,7 @@ Success means that whitepapers with no common format can be compared along the s
 
 Rochondra aims to support decisions with verifiable measurements rather than social signals. Its outputs are built in stages, and each stage is usable on its own before the next is available.
 
-- **Stage 1:** positioning a document along measured structural dimensions against several thousand others. This stage is available as soon as part of the corpus has been processed and becomes more informative as ingestion continues.
+- **Stage 1:** position a document along measured structural dimensions against several thousand others. This stage is available as soon as part of the corpus has been processed and becomes more informative as ingestion continues.
 - **Stage 2:** split the document according to its own table of contents, with quick navigation, a section-by-section summary and sentiment analysis. This splitting supports reading a single document rather than comparing documents, since each whitepaper has its own structure.
 - **Stage 3:** map each document into a common outline (introduction, risks, content and other parts) using a topic modeling method from the literature, so that sections become comparable across the whole corpus. This stage requires the segmentation method to be validated first.
 - **Stage 4:** extend the set of indicators, for example with named entities and innovation markers, drawing on both the scientific literature and in-house work.
@@ -61,7 +61,7 @@ In the longer term, Rochondra will expand to the other evaluation pillars, aimin
 
 The application currently handles PDF whitepapers and is built on three layers: an API that exposes the extraction and analysis steps; storage split between a working cache, object storage for files and a persistent database; and an interface that is still a Streamlit prototype.
 
-The corpus has been built out of 6,941 attempted URLs, 5,880 documents (30.4 GB) were retrieved and verified, and 5,300 of them can be used directly as text. The 2017–2019 period, which had lost the most documents, was largely rebuilt from the Internet Archive, raising its recovery rate from 14.7% to 71.7%. Truncation and selection biases have been identified and measured against a known denominator, and the method used to build the corpus is described in a dedicated article (Work in progress, Link will be updated later on).
+The corpus has been built out of 6,941 attempted URLs, 5,880 documents (30.4 GB) were retrieved and verified, and 5,300 of them can be used directly as text. The 2017–2019 period, which had lost the most documents, was largely rebuilt from the Internet Archive, raising its recovery rate from 14.7% to 71.7%. Truncation and selection biases have been identified and measured against a known denominator, and the method used to build the corpus is described in a dedicated article (link to follow).
 
 Some resources are already available but not yet used: project activity statuses and GitBook documentation URLs. Since GitBook has become the dominant format for recent projects, processing these URLs is necessary to keep the corpus from remaining biased toward the post-ICO era.
 
