@@ -73,7 +73,7 @@ The project is run by a single person with irregular availability, so steps are 
 
 Two criteria are applied to each task, in this order:
 
-- Downstream impact: a task that unblocks three others comes before one that unlocks only one.
+- Downstream impact: a task that unblocks three others comes before one that unblocks only one.
 - Cost of delay: tests and migrations cost little today, but more with every week that passes.
 
 The first criterion is the easiest to neglect, because tasks that reduce uncertainty produce nothing visible. They get pushed back, and everything that depends on them remains impossible to plan. For example, measuring the processing cost per document unblocks no code, but it unblocks every decision that follows. Both criteria are made explicit so that the roadmap can be checked rather than taken on trust.
