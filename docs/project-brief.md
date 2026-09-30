@@ -14,7 +14,7 @@ This document sets out the problem Rochondra addresses, the direction the projec
 
 | Version | Author | Description | Date |
 |---|---|---|---|
-| 0.1 | Hassan Zbib | Initial Version | 15/09/2026 |
+| 1.0 | Hassan Zbib | Initial Version | 30/09/2026 |
 
 ## 1. Problem
 
