@@ -54,7 +54,8 @@ written up separately:
 - **[Decision log](docs/decision-log.md)**: the decisions that shaped the
   project, each with the alternatives ruled out and the cost accepted. Where the
   code does not yet follow a decision, the entry says so.
-- **Roadmap**: to follow.
+- **[Roadmap](docs/roadmap.md)**: what comes next, in dependency order, phase
+  by phase, each with its objective and exit criterion.
 
 ## Quickstart
 

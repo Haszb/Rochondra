@@ -2,7 +2,7 @@
 
 *Comparative analysis of digital-asset whitepapers*
 
-This document sets out the problem Rochondra addresses, the direction the project is taking, and the method that guides its trade-offs. It does not cover project progress, which is tracked in the roadmap, or the architecture decisions and their costs, which are recorded in the [decision log](decision-log.md).
+This document sets out the problem Rochondra addresses, the direction the project is taking, and the method that guides its trade-offs. It does not cover project progress, which is tracked in the [roadmap](roadmap.md), or the architecture decisions and their costs, which are recorded in the [decision log](decision-log.md).
 
 - **Repository:** <https://github.com/Haszb/Rochondra>
 - **Author:** Hassan Zbib
